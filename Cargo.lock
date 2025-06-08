@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dmr"
+name = "dser"
 version = "0.1.0"
 dependencies = [
  "colored",

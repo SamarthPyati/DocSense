@@ -1,25 +1,11 @@
-use std::fs::{self};
+use std::fs::{self, File};
 use std::io::{self};
-use std::path::{Path, PathBuf};
+use std::env::{self};
+use std::process::{exit};
+use std::path::{PathBuf};
 use xml::{self, reader::XmlEvent};
 use std::collections::HashMap;
 use colored::Colorize;
-
-/**
- *  Parse all the text (Character Events) from the XML File 
- */ 
-fn read_xml_file(fp: &str) -> io::Result<String> {
-    let file = fs::File::open(fp)?;
-    let er = xml::EventReader::new(file);
-    let mut content = String::new();
-    for event in er.into_iter() {
-        if let Ok(XmlEvent::Characters(text)) = event {
-            content.push_str(&text);
-            content.push_str(" ");  // To differentiate between string token insert additional spaces
-        }
-    }
-    return Ok(content);
-}
 
 #[derive(Debug)]
 struct Lexer<'a> {
@@ -89,8 +75,22 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
+/* Parse all the text (Character Events) from the XML File */
+fn read_xml_file(fp: &str) -> io::Result<String> {
+    let file = fs::File::open(fp)?;
+    let er = xml::EventReader::new(file);
+    let mut content = String::new();
+    for event in er.into_iter() {
+        if let Ok(XmlEvent::Characters(text)) = event {
+            content.push_str(&text);
+            content.push_str(" ");  // To differentiate between string token insert additional spaces
+        }
+    }
+    return Ok(content);
+}
+
+/* Returns frequency table of a document containing mapping of term along with its frequency of occurence */
 fn index_document(fp: &str) -> io::Result<HashMap<String, usize>> {
-    /* Returns frequency table of a document containing mapping of term along with its frequency of occurence */
     let content = read_xml_file(&fp)?.chars().collect::<Vec<_>>();
     let lexer = Lexer::new(&content);
 
@@ -104,12 +104,42 @@ fn index_document(fp: &str) -> io::Result<HashMap<String, usize>> {
     Ok(ft)
 }
 
+/* Indexes a particular folder to 'index.json' */
+fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<()> {
+    let dir = fs::read_dir(dir_path)?;
+    let mut tf_index: FreqTableIndex = FreqTableIndex::new();
+
+    for file in dir {
+        let file_path = file?.path();
+        println!("Indexing {:?} ...", file_path);
+
+        let tf: FreqTable = index_document(file_path.to_str().unwrap())?;
+        tf_index.insert(file_path, tf);
+    }
+
+    let index_path = index_path.unwrap_or(DEFAULT_INDEX_FILE_PATH);
+    println!("Saving folder index to {} ...", index_path);
+    let index_file = File::create(index_path)?;
+    serde_json::to_writer(index_file, &tf_index)?;
+    Ok(())
+}
+
+/* Check the amount of files present in the main frequency table index */
+fn check_index(index_fp: &str) -> io::Result<()> {
+    let index_file = fs::File::open(index_fp)?;
+    println!("Reading {} file ...", index_fp);
+    let tf_index: FreqTableIndex = serde_json::from_reader(index_file).expect("{index_fp} file should be existing in file system.");
+    println!("Index file has {} entries.", tf_index.len());
+    Ok(())
+}
+
 // Associative types
 type FreqTable = HashMap::<String, usize>;
 type FreqTableIndex = HashMap<PathBuf, FreqTable>;
 
-const INDEX_FILE_PATH: &str = "index.json";
+const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
 
+#[allow(dead_code)]
 fn fetch_index(index_fp: PathBuf) -> io::Result<FreqTableIndex> {
     let metadata = fs::metadata(&index_fp)?;
     if metadata.len() == 0 {
@@ -132,6 +162,7 @@ fn update_index(index_fp: PathBuf, tf_index: &FreqTableIndex) -> io::Result<()>{
     Ok(())
 }
 
+#[allow(dead_code)]
 fn print_statistics(index: &FreqTableIndex) {
 
     for (i, (file_path, freq_table)) in index.iter().enumerate() {
@@ -154,36 +185,70 @@ fn print_statistics(index: &FreqTableIndex) {
     }
 }
 
-fn main() -> io::Result<()> {
-    
-    let dir = fs::read_dir("docs.gl/gl4")?;
+fn main() -> io::Result<()> {   
 
-    let index_fp_path_buf = Path::new(INDEX_FILE_PATH).to_path_buf();
-    let mut tf_index = fetch_index(index_fp_path_buf)?;
+    let mut args = env::args();
+    let _program = args.next().expect("Path to program must be provided.");
 
-    if tf_index.is_empty() {
-        /* Incase not possible to fetch index start over indexing again */ 
-        for (i, file) in dir.into_iter().enumerate() {
-            let file_path = file?.path();
-            // let file_path = file_path.to_str().unwrap();
-            let freq_table: FreqTable = index_document(file_path.to_str().unwrap())?;
+    let subcommand = args.next().unwrap_or_else(|| {
+        eprintln!("{}: no subcommand is provided.", "ERROR".bold().red());
+        exit(1)
+    });
 
-            let file_path_string = file_path.to_str().unwrap().to_string();
-            println!("{i} Indexing {file_path} ...", i = i.to_string().italic(), 
-                                                    file_path = file_path_string.bold().blue());
-            tf_index.insert(file_path, freq_table);    
+
+    match subcommand.as_str() {
+        "index" => {
+            let dir_path = args.next().unwrap_or_else(|| {
+                eprintln!("{}: no directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                exit(1);
+            });
+
+            index_folder(&dir_path, Some("index.json")).unwrap_or_else(|err| {
+                eprintln!("{}: failed to index folder {} due to {}", "ERROR".bold().red(), dir_path.bold(), err.to_string().red());
+                exit(1);
+            });
+        }
+
+        "search" => {
+            let index_path = args.next().unwrap_or_else(|| {
+                println!("{}: no index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                exit(1);
+            });
+            check_index(&index_path).unwrap_or_else(|err| {
+                println!("{}: could not check index file {index_path}: {err}", "ERROR".bold().red());
+                exit(1);
+            });
+        }
+
+        _ => {
+            eprintln!("{}: Unknown subcommand {}", "ERROR".bold().red(), subcommand.bold().bright_blue());
+            exit(1);
         }
     }
 
-    print_statistics(&tf_index);
-    println!();
+    // let dir = fs::read_dir("docs.gl/gl4")?;
 
-    // let index_fp = Path::new("index.json");    
-    // update_index(index_fp.to_path_buf(), &tf_index)?;
+    // let index_fp_path_buf = Path::new(DEFAULT_INDEX_FILE_PATH).to_path_buf();
+    // let mut tf_index = fetch_index(index_fp_path_buf)?;
 
-    // for (path, freq_table) in tf_index {
-    //     println!("{path:3>?} has {count} unique terms in it", count = freq_table.len().to_string().bold().green());
+    // check_index("index.json")?;
+
+    // if tf_index.is_empty() {
+    //     /* Incase not possible to fetch index start over indexing again */ 
+    //     for (i, file) in dir.into_iter().enumerate() {
+    //         let file_path = file?.path();
+    //         // let file_path = file_path.to_str().unwrap();
+    //         let freq_table: FreqTable = index_document(file_path.to_str().unwrap())?;
+
+    //         let file_path_string = file_path.to_str().unwrap().to_string();
+    //         println!("{i} Indexing {file_path} ...", i = i.to_string().italic(), 
+    //                                                 file_path = file_path_string.bold().blue());
+    //         tf_index.insert(file_path, freq_table);    
+    //     }
     // }
+
+    // // print_statistics(&tf_index);
+    // println!();
 
     return Ok(());
 }
