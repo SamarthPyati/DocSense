@@ -2,8 +2,9 @@ use std::fs::{self, File};
 use std::io::{self};
 use std::env::{self};
 use std::process::{exit};
-use std::path::{PathBuf};
-use xml::{self, reader::XmlEvent};
+use std::path::{PathBuf, Path};
+use xml::{self, reader::XmlEvent, EventReader};
+use xml::common::{TextPosition, Position};
 use std::collections::HashMap;
 use colored::Colorize;
 
@@ -76,22 +77,38 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 /* Parse all the text (Character Events) from the XML File */
-fn read_xml_file(fp: &str) -> io::Result<String> {
-    let file = fs::File::open(fp)?;
-    let er = xml::EventReader::new(file);
+fn read_xml_file(file_path: &Path) -> Result<String, ()> {
+    let file = File::open(file_path).map_err(|err| {
+        eprintln!("ERROR: could not open file {file_path}: {err}", file_path = file_path.display());
+    })?;
+    let er = EventReader::new(file);
     let mut content = String::new();
     for event in er.into_iter() {
-        if let Ok(XmlEvent::Characters(text)) = event {
+        let event = event.map_err(|err| {
+            let TextPosition {row, column} = err.position();
+            let msg = err.msg();
+            eprintln!("{file_path}:{row}:{column}: {err}: {msg}", err = "ERROR".red().bold(), file_path = file_path.display());
+        })?;
+
+        if let XmlEvent::Characters(text) = event {
             content.push_str(&text);
-            content.push_str(" ");  // To differentiate between string token insert additional spaces
+            content.push(' ');
         }
     }
-    return Ok(content);
+    Ok(content)
 }
 
 /* Returns frequency table of a document containing mapping of term along with its frequency of occurence */
-fn index_document(fp: &str) -> io::Result<HashMap<String, usize>> {
-    let content = read_xml_file(&fp)?.chars().collect::<Vec<_>>();
+fn index_document(fp: &Path) -> io::Result<HashMap<String, usize>> {
+    let content = match read_xml_file(fp) {
+        Ok(content) => content,
+        Err(error) => {
+            eprintln!("{err}: Failed to read xml file {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = fp, msg = error);
+            return Ok(HashMap::new()); // Return empty map to continue
+        }
+    };
+
+    let content = content.chars().collect::<Vec<_>>();
     let lexer = Lexer::new(&content);
 
 
@@ -113,7 +130,7 @@ fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<
         let file_path = file?.path();
         println!("Indexing {:?} ...", file_path);
 
-        let tf: FreqTable = index_document(file_path.to_str().unwrap())?;
+        let tf: FreqTable = index_document(file_path.as_path())?;
         tf_index.insert(file_path, tf);
     }
 
@@ -126,11 +143,17 @@ fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<
 
 /* Check the amount of files present in the main frequency table index */
 fn check_index(index_fp: &str) -> io::Result<()> {
-    let index_file = fs::File::open(index_fp)?;
+    let index_file = fs::File::open(index_fp).unwrap_or_else(|err| {
+        eprintln!("{}: could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
+        exit(1);
+    });
     println!("Reading {} file ...", index_fp);
-    let tf_index: FreqTableIndex = serde_json::from_reader(index_file).expect("{index_fp} file should be existing in file system.");
+    let tf_index: FreqTableIndex = serde_json::from_reader(index_file).unwrap_or_else(|err|  {
+        eprintln!("{}: serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
+        exit(1);
+    });
     println!("Index file has {} entries.", tf_index.len());
-    Ok(())
+    Ok(())  
 }
 
 // Associative types
@@ -185,14 +208,22 @@ fn print_statistics(index: &FreqTableIndex) {
     }
 }
 
+fn usage(program: &String) {
+    eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
+    eprintln!("Subcommands:");
+    eprintln!("    index <folder>         index the <folder> and save the index to index.json file");
+    eprintln!("    check <index-file>     check how many documents are indexed in the file (searching is not implemented yet)");
+}
+
 fn main() -> io::Result<()> {   
 
     let mut args = env::args();
-    let _program = args.next().expect("Path to program must be provided.");
+    let program = args.next().expect("Path to program must be provided.");
 
     let subcommand = args.next().unwrap_or_else(|| {
+        usage(&program);
         eprintln!("{}: no subcommand is provided.", "ERROR".bold().red());
-        exit(1)
+        exit(1);
     });
 
 
@@ -203,24 +234,27 @@ fn main() -> io::Result<()> {
                 exit(1);
             });
 
-            index_folder(&dir_path, Some("index.json")).unwrap_or_else(|err| {
-                eprintln!("{}: failed to index folder {} due to {}", "ERROR".bold().red(), dir_path.bold(), err.to_string().red());
+            index_folder(&dir_path, Some(DEFAULT_INDEX_FILE_PATH)).unwrap_or_else(|err| {
+                eprintln!("{}: failed to index folder {} as \"{}\"", "ERROR".bold().red(), dir_path.bold(), err.to_string().red());
                 exit(1);
             });
         }
 
-        "search" => {
+        "check" => {
             let index_path = args.next().unwrap_or_else(|| {
                 println!("{}: no index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
                 exit(1);
             });
+
             check_index(&index_path).unwrap_or_else(|err| {
-                println!("{}: could not check index file {index_path}: {err}", "ERROR".bold().red());
+                println!("{}: could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
                 exit(1);
             });
         }
 
         _ => {
+
+            usage(&program);
             eprintln!("{}: Unknown subcommand {}", "ERROR".bold().red(), subcommand.bold().bright_blue());
             exit(1);
         }
