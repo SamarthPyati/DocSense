@@ -87,7 +87,8 @@ fn read_xml_file(file_path: &Path) -> Result<String, ()> {
         let event = event.map_err(|err| {
             let TextPosition {row, column} = err.position();
             let msg = err.msg();
-            eprintln!("{file_path}:{row}:{column}: {err}: {msg}", err = "ERROR".red().bold(), file_path = file_path.display());
+            eprintln!("{file_path}:{row}:{column}: {err}: {msg}", err = "ERROR".red(), 
+                                                                file_path = file_path.display());
         })?;
 
         if let XmlEvent::Characters(text) = event {
@@ -121,6 +122,17 @@ fn index_document(fp: &Path) -> io::Result<HashMap<String, usize>> {
     Ok(ft)
 }
 
+/* Save the Frequency Table Index to a path as index.json */
+fn save_index(tf_index: &FreqTableIndex, index_path: Option<&'static str>) -> io::Result<()> {
+    let index_path = index_path.unwrap_or(DEFAULT_INDEX_FILE_PATH);
+    println!("Saving folder index to {} ...", index_path);
+    let index_file = File::create(index_path)?;
+    serde_json::to_writer(index_file, tf_index).unwrap_or_else(|err| {
+        eprintln!("{err}: Failed to save {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = index_path, msg = err);
+    });
+    Ok(())
+}
+
 /* Indexes a particular folder to 'index.json' */
 fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<()> {
     let dir = fs::read_dir(dir_path)?;
@@ -134,10 +146,7 @@ fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<
         tf_index.insert(file_path, tf);
     }
 
-    let index_path = index_path.unwrap_or(DEFAULT_INDEX_FILE_PATH);
-    println!("Saving folder index to {} ...", index_path);
-    let index_file = File::create(index_path)?;
-    serde_json::to_writer(index_file, &tf_index)?;
+    save_index(&tf_index, index_path)?;
     Ok(())
 }
 
