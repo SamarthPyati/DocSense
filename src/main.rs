@@ -55,9 +55,12 @@ impl<'a> Lexer<'a> {
         }
 
         if self.content[0].is_numeric() {
-            return Some(self.chop_while(|x| x.is_numeric()));
+            // Ignore single char number 
+            let result = self.chop_while(|x| x.is_numeric());
+            if result.len() == 1 { return None; }
+            return Some(result);
         }
-
+        
         if self.content[0].is_alphabetic() {
             return Some(self.chop_while(|x| x.is_alphanumeric()));
         }
