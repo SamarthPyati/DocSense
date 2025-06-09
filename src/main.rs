@@ -3,9 +3,12 @@ use std::io::{self};
 use std::env::{self};
 use std::process::{exit, ExitCode};
 use std::path::{PathBuf, Path};
+use std::collections::HashMap;
+
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
-use std::collections::HashMap;
+
+use tiny_http::{Server, Response};
 use colored::Colorize;
 
 #[derive(Debug)]
@@ -228,7 +231,6 @@ fn update_index(index_fp: PathBuf, tf_index: &FreqTableIndex) -> io::Result<()>{
 
 #[allow(dead_code)]
 fn print_statistics(index: &FreqTableIndex) {
-
     for (i, (file_path, freq_table)) in index.iter().enumerate() {
 
         /* Printing Statistics */
@@ -252,8 +254,9 @@ fn print_statistics(index: &FreqTableIndex) {
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index <folder>         index the <folder> and save the index to index.json file");
-    eprintln!("    check <index-file>     check how many documents are indexed in the file (searching is not implemented yet)");
+    eprintln!("    index <folder>         Index the <folder> and save the index to index.json file");
+    eprintln!("    check <index-file>     Check how many documents are indexed in the file (searching is not implemented yet)");
+    eprintln!("    serve [address]        Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
@@ -293,6 +296,31 @@ fn entry() -> io::Result<()> {
                 println!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
                 exit(1);
             });
+        }
+
+        "serve" => {
+            let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
+            let address_str = "http://".to_string() + &address + "/";   // Weird ass rust string concat
+            println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
+            let server = Server::http(address).unwrap();
+
+            for request in server.incoming_requests() {
+                println!("{info}: Received request! method: [{req}], url: {url:?}",
+                    info = "INFO".bright_cyan(), 
+                    req = request.method().as_str().bright_green(),
+                    url = request.url()
+                );
+
+                let html_fp = "src/index.html";
+                let html_file = File::open(Path::new(html_fp)).map_err(|err| {
+                    eprintln!("{}: Could not open html file {file_path} as {err}", "ERROR".bold().red(), file_path = html_fp);
+                }).unwrap();
+                
+                let res = Response::from_file(html_file);
+                let _ = request.respond(res).map_err(|err| {
+                    eprintln!("{}: Could not serve request as {err:?}", "ERROR".bold().red());
+                });
+            }
         }
 
         _ => {
