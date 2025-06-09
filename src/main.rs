@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
 
-use tiny_http::{Server, Response};
+use tiny_http::{Server, Response, Request};
 use colored::Colorize;
 
 #[derive(Debug)]
@@ -42,7 +42,7 @@ impl<'a> Lexer<'a> {
     where
         P: FnMut(&char) -> bool,
     {
-        /* Return a slice of n len on predicate being true */
+        /* Return a chopped slice of n length on predicate being true */
         let mut n = 0;
         while n < self.content.len() && predicate(&self.content[n]) {
             n += 1;
@@ -58,19 +58,25 @@ impl<'a> Lexer<'a> {
         }
 
         if self.content[0].is_numeric() {
-            // Ignore single char number 
+            // Ignore single digit number 
             let result = self.chop_while(|x| x.is_numeric());
             if result.len() == 1 { return None; }
             return Some(result);
         }
-        
+
         if self.content[0].is_alphabetic() {
             return Some(self.chop_while(|x| x.is_alphanumeric()));
         }
+        
+        let unwanted_symbols  = &[',', ';', '*', '/', '?', '{', '}', '(', ')', '.', '$', '_', '-'];
+        
+        // Ignore single-character unwanted punctuation
+        if unwanted_symbols.contains(&self.content[0]) {
+            self.chop(1);   // skip this token 
+            return self.next_token();       // recursively fetch next token 
+        }
 
         let token = self.chop(1);
-        // eprintln!("{}:{}", "Invalid token encountered ".bold().red(), 
-                            // token.iter().collect::<String>().bold().white());
         return Some(token);
     }
 }
@@ -251,6 +257,26 @@ fn print_statistics(index: &FreqTableIndex) {
     }
 }
 
+fn serve_request(request: Request) -> Result<(), ()> {
+    println!("{info}: Received request! method: [{req}], url: {url:?}",
+        info = "INFO".bright_cyan(), 
+        req = &request.method().as_str().bright_green(),
+        url = &request.url()
+    );
+
+    let html_fp = "src/index.html";
+    let html_file = File::open(Path::new(html_fp)).map_err(|err| {
+        let err = err.to_string();
+        eprintln!("{}: Could not open html file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = html_fp, err = err.red());
+    }).unwrap();
+    
+    let res = Response::from_file(html_file);
+    request.respond(res).map_err(|err| {
+        eprintln!("{}: Could not serve request as {err:?}", "ERROR".bold().red());
+    })?;
+    Ok(())
+}
+
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
@@ -305,21 +331,7 @@ fn entry() -> io::Result<()> {
             let server = Server::http(address).unwrap();
 
             for request in server.incoming_requests() {
-                println!("{info}: Received request! method: [{req}], url: {url:?}",
-                    info = "INFO".bright_cyan(), 
-                    req = request.method().as_str().bright_green(),
-                    url = request.url()
-                );
-
-                let html_fp = "src/index.html";
-                let html_file = File::open(Path::new(html_fp)).map_err(|err| {
-                    eprintln!("{}: Could not open html file {file_path} as {err}", "ERROR".bold().red(), file_path = html_fp);
-                }).unwrap();
-                
-                let res = Response::from_file(html_file);
-                let _ = request.respond(res).map_err(|err| {
-                    eprintln!("{}: Could not serve request as {err:?}", "ERROR".bold().red());
-                });
+                let _ = serve_request(request);
             }
         }
 
