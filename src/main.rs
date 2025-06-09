@@ -10,8 +10,8 @@ use colored::Colorize;
 
 #[derive(Debug)]
 struct Lexer<'a> {
-    // Lifetimes implemented as content not owned
-    // As used it will be assigned or shifted
+    // Lifetimes implemented as content is not owned
+    // as used it will be assigned or shifted
     content: &'a [char]
 }
 
@@ -79,7 +79,7 @@ impl<'a> Iterator for Lexer<'a> {
 /* Parse all the text (Character Events) from the XML File */
 fn read_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
-        eprintln!("ERROR: could not open file {file_path}: {err}", file_path = file_path.display());
+        eprintln!("{}: Could not open file {file_path}: {err}", "ERROR".bold().red(), file_path = file_path.display());
     })?;
     let er = EventReader::new(file);
     let mut content = String::new();
@@ -104,14 +104,14 @@ fn index_document(fp: &Path) -> io::Result<HashMap<String, usize>> {
     let content = match read_xml_file(fp) {
         Ok(content) => content,
         Err(error) => {
-            eprintln!("{err}: Failed to read xml file {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = fp, msg = error);
+            let fp_str= fp.to_str().unwrap();
+            eprintln!("{err}: Failed to read xml file {fp}: {msg:?}", err = "ERROR".bold().red(), fp = fp_str.bright_blue(), msg = error);
             return Ok(HashMap::new()); // Return empty map to continue
         }
     };
 
     let content = content.chars().collect::<Vec<_>>();
     let lexer = Lexer::new(&content);
-
 
     let mut ft = HashMap::<String, usize>::new();
     for token in lexer {
@@ -134,31 +134,60 @@ fn save_index(tf_index: &FreqTableIndex, index_path: Option<&'static str>) -> io
 }
 
 /* Indexes a particular folder to 'index.json' */
-fn index_folder(dir_path: &str, index_path: Option<&'static str>) -> io::Result<()> {
-    let dir = fs::read_dir(dir_path)?;
-    let mut tf_index: FreqTableIndex = FreqTableIndex::new();
+fn index_folder(dir_path: &str, tf_index: &mut FreqTableIndex) -> Result<(), ()> {
+    let dir = fs::read_dir(dir_path).map_err(|err| {
+        eprintln!("{err}: Failed to read directory {dir_path} as \"{msg}\"", err = "ERROR".bold().red(), 
+                                                                            dir_path = dir_path.bold().bright_blue(), 
+                                                                            msg = err.to_string().red());
+    })?;
 
-    for file in dir {
-        let file_path = file?.path();
-        println!("Indexing {:?} ...", file_path);
+    'step: for file in dir {
+        let file = file.map_err(|err| {
+            eprintln!("{err}: Failed to read next file in directory {dir_path} as {msg}", err = "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), msg = err.to_string().red());
+        })?;
 
-        let tf: FreqTable = index_document(file_path.as_path())?;
+        let file_path = file.path();
+        let file_path_str = file_path.to_str().unwrap();
+
+        // Skip unsupported files
+        if let Some(ext) = file_path.extension() {
+            const ALLOWED_EXTS: [&str; 2] = ["xml", "xhtml"];
+            if !ALLOWED_EXTS.contains(&ext.to_str().unwrap()) {
+                println!("{}: Skipping non-XML file {}", "INFO".cyan(), file_path_str.bright_yellow());
+                continue 'step;
+            }
+        }
+
+        // If file is another directory recursively index it too 
+        let file_type = file.file_type().map_err(|err| {
+            eprintln!("{err}: Failed to determine file type for {file_path} as {msg}", err = "ERROR".bold().red(), file_path = file_path_str.bold().bright_blue(), msg = err.to_string().red());
+        })?;
+
+        if file_type.is_dir() {
+            // Recursively index all the folders
+            let _ = index_folder(file_path_str, tf_index);
+            continue 'step;
+        }   
+
+        println!("Indexing {} ...", file_path_str.bright_cyan());
+
+        let tf: FreqTable = index_document(file_path.as_path()).map_err(|err| {
+            eprintln!("{err}: Failed to index document {file_path} as {msg}", err = "ERROR".bold().red(), file_path = file_path_str.bold().bright_blue(), msg = err.to_string().red());
+        })?;
         tf_index.insert(file_path, tf);
     }
-
-    save_index(&tf_index, index_path)?;
     Ok(())
 }
 
 /* Check the amount of files present in the main frequency table index */
 fn check_index(index_fp: &str) -> io::Result<()> {
     let index_file = fs::File::open(index_fp).unwrap_or_else(|err| {
-        eprintln!("{}: could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
+        eprintln!("{}: Could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bright_blue(), err = err.to_string().red());
         exit(1);
     });
     println!("Reading {} file ...", index_fp);
     let tf_index: FreqTableIndex = serde_json::from_reader(index_file).unwrap_or_else(|err|  {
-        eprintln!("{}: serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
+        eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
         exit(1);
     });
     println!("Index file has {} entries.", tf_index.len());
@@ -239,24 +268,27 @@ fn main() -> io::Result<()> {
     match subcommand.as_str() {
         "index" => {
             let dir_path = args.next().unwrap_or_else(|| {
-                eprintln!("{}: no directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
                 exit(1);
             });
 
-            index_folder(&dir_path, Some(DEFAULT_INDEX_FILE_PATH)).unwrap_or_else(|err| {
-                eprintln!("{}: failed to index folder {} as \"{}\"", "ERROR".bold().red(), dir_path.bold(), err.to_string().red());
-                exit(1);
+            let mut tf_index: FreqTableIndex = FreqTableIndex::new();
+
+            let _ = index_folder(&dir_path,&mut tf_index).map_err(|err| {
+                eprintln!("{}: Failed to index folder {dir_path} as \"{err:?}\"", "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), err = err);
             });
+            // Gave "None" as default path is 'index.json'
+            save_index(&tf_index, None)?;
         }
 
         "check" => {
             let index_path = args.next().unwrap_or_else(|| {
-                println!("{}: no index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                println!("{}: No index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
                 exit(1);
             });
 
             check_index(&index_path).unwrap_or_else(|err| {
-                println!("{}: could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
+                println!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
                 exit(1);
             });
         }
