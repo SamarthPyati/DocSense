@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{self};
 use std::env::{self};
-use std::process::{exit};
+use std::process::{exit, ExitCode};
 use std::path::{PathBuf, Path};
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
@@ -256,8 +256,7 @@ fn usage(program: &String) {
     eprintln!("    check <index-file>     check how many documents are indexed in the file (searching is not implemented yet)");
 }
 
-fn main() -> io::Result<()> {   
-
+fn entry() -> io::Result<()> {
     let mut args = env::args();
     let program = args.next().expect("Path to program must be provided.");
 
@@ -303,30 +302,15 @@ fn main() -> io::Result<()> {
             exit(1);
         }
     }
+    Ok(())
+}
 
-    // let dir = fs::read_dir("docs.gl/gl4")?;
-
-    // let index_fp_path_buf = Path::new(DEFAULT_INDEX_FILE_PATH).to_path_buf();
-    // let mut tf_index = fetch_index(index_fp_path_buf)?;
-
-    // check_index("index.json")?;
-
-    // if tf_index.is_empty() {
-    //     /* Incase not possible to fetch index start over indexing again */ 
-    //     for (i, file) in dir.into_iter().enumerate() {
-    //         let file_path = file?.path();
-    //         // let file_path = file_path.to_str().unwrap();
-    //         let freq_table: FreqTable = index_document(file_path.to_str().unwrap())?;
-
-    //         let file_path_string = file_path.to_str().unwrap().to_string();
-    //         println!("{i} Indexing {file_path} ...", i = i.to_string().italic(), 
-    //                                                 file_path = file_path_string.bold().blue());
-    //         tf_index.insert(file_path, freq_table);    
-    //     }
-    // }
-
-    // // print_statistics(&tf_index);
-    // println!();
+fn main() -> io::Result<()> {   
+    
+    match entry() {
+        Ok(()) => ExitCode::SUCCESS, 
+        Err(_) => ExitCode::FAILURE 
+    };
 
     return Ok(());
 }
