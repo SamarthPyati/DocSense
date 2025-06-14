@@ -208,7 +208,7 @@ fn check_index(index_fp: &str) -> io::Result<()> {
 
 // Associative types
 type FreqTable = HashMap::<String, usize>;
-type FreqTableIndex = HashMap<PathBuf, FreqTable>;
+type FreqTableIndex = HashMap::<PathBuf, FreqTable>;
 
 const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
 
@@ -257,6 +257,17 @@ fn print_statistics(index: &FreqTableIndex) {
     }
 }
 
+fn serve_static_file(request: Request, file_path: &str) -> Result<(), ()> {
+    let html_file = File::open(Path::new(file_path)).map_err(|err| {
+        eprintln!("{}: Could not open html file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_blue(), err = err.to_string().red());
+    }).unwrap();
+    
+    let res = Response::from_file(html_file);
+    request.respond(res).map_err(|err| {
+        eprintln!("{}: Could not serve request for {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_cyan(), err = err.to_string().red());
+    })
+}
+
 fn serve_request(request: Request) -> Result<(), ()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
@@ -264,16 +275,7 @@ fn serve_request(request: Request) -> Result<(), ()> {
         url = &request.url()
     );
 
-    let html_fp = "src/index.html";
-    let html_file = File::open(Path::new(html_fp)).map_err(|err| {
-        let err = err.to_string();
-        eprintln!("{}: Could not open html file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = html_fp, err = err.red());
-    }).unwrap();
-    
-    let res = Response::from_file(html_file);
-    request.respond(res).map_err(|err| {
-        eprintln!("{}: Could not serve request as {err:?}", "ERROR".bold().red());
-    })?;
+    serve_static_file(request, "src/index.html")?;
     Ok(())
 }
 
