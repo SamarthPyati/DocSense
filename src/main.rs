@@ -4,11 +4,13 @@ use std::env::{self};
 use std::process::{exit, ExitCode};
 use std::path::{PathBuf, Path};
 use std::collections::HashMap;
+use std::result;
+use std::str::{self};
 
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
 
-use tiny_http::{Server, Response, Request};
+use tiny_http::{Method, Request, Response, Server, StatusCode};
 use colored::Colorize;
 
 #[derive(Debug)]
@@ -50,7 +52,7 @@ impl<'a> Lexer<'a> {
         return self.chop(n);
     }
 
-    fn next_token(&mut self) -> Option<&'a [char]> {
+    fn next_token(&mut self) -> Option<String> {
         self.trim_left();
 
         if self.content.len() == 0 {
@@ -61,11 +63,12 @@ impl<'a> Lexer<'a> {
             // Ignore single digit number 
             let result = self.chop_while(|x| x.is_numeric());
             if result.len() == 1 { return None; }
-            return Some(result);
+            return Some(result.iter().collect());
         }
 
         if self.content[0].is_alphabetic() {
-            return Some(self.chop_while(|x| x.is_alphanumeric()));
+            let result = self.chop_while(|x| x.is_alphanumeric());
+            return Some(result.iter().map(|x| x.to_ascii_uppercase()).collect());
         }
         
         let unwanted_symbols  = &[',', ';', '*', '/', '?', '{', '}', '(', ')', '.', '$', '_', '-'];
@@ -73,16 +76,16 @@ impl<'a> Lexer<'a> {
         // Ignore single-character unwanted punctuation
         if unwanted_symbols.contains(&self.content[0]) {
             self.chop(1);   // skip this token 
-            return self.next_token();       // recursively fetch next token 
+            return self.next_token();     // recursively fetch next token 
         }
 
         let token = self.chop(1);
-        return Some(token);
+        return Some(token.iter().collect());
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = &'a [char];
+    type Item = String;
     fn next(&mut self) -> Option<<Self as Iterator>::Item> { 
         self.next_token()
     }
@@ -112,7 +115,7 @@ fn read_xml_file(file_path: &Path) -> Result<String, ()> {
 }
 
 /* Returns frequency table of a document containing mapping of term along with its frequency of occurence */
-fn index_document(fp: &Path) -> io::Result<HashMap<String, usize>> {
+fn index_document(fp: &Path) -> io::Result<FreqTable> {
     let content = match read_xml_file(fp) {
         Ok(content) => content,
         Err(error) => {
@@ -127,7 +130,6 @@ fn index_document(fp: &Path) -> io::Result<HashMap<String, usize>> {
 
     let mut ft = HashMap::<String, usize>::new();
     for token in lexer {
-        let token = token.iter().collect::<String>().to_uppercase();
         ft.entry(token).and_modify(|x| *x += 1).or_insert(1);
     }
 
@@ -263,19 +265,60 @@ fn serve_static_file(request: Request, file_path: &str) -> Result<(), ()> {
     }).unwrap();
     
     let res = Response::from_file(html_file);
-    request.respond(res).map_err(|err| {
+    return request.respond(res).map_err(|err| {
         eprintln!("{}: Could not serve request for {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_cyan(), err = err.to_string().red());
-    })
+    });
 }
 
-fn serve_request(request: Request) -> Result<(), ()> {
+fn serve_404(request: Request) -> Result<(), ()> {
+    return request.respond(Response::from_string("404")
+            .with_status_code(StatusCode(404)))
+            .map_err(|err| {
+                eprintln!("{}: Could not serve request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            });
+}
+
+fn serve_request(mut request: Request) -> Result<(), ()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
         url = &request.url()
     );
 
-    serve_static_file(request, "src/index.html")?;
+    match (&request.method(), request.url()) {
+        
+        (Method::Get, "/") | (Method::Get, "/index.html") => {
+            serve_static_file(request, "src/index.html")?;
+        }
+
+        (Method::Get, "/index.js") => {
+            serve_static_file(request, "src/index.js")?;
+        }
+
+        (Method::Post, "/api/search") => {
+            let mut buf = Vec::new();
+            request.as_reader().read_to_end(&mut buf).map_err(|err| {
+                eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            })?;
+
+            let body = str::from_utf8(&mut buf).map_err(|err| {
+                eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            })?.chars().collect::<Vec<_>>();
+
+            for token in Lexer::new(&body) {
+                println!("{:?}", token);
+            }
+
+            request.respond(Response::from_string("Ok")).map_err(|err| {
+                eprintln!("{}: \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            })?;
+        }
+
+        _ => {
+            serve_404(request)?
+        }
+    }
+
     Ok(())
 }
 
@@ -283,7 +326,7 @@ fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
     eprintln!("    index <folder>         Index the <folder> and save the index to index.json file");
-    eprintln!("    check <index-file>     Check how many documents are indexed in the file (searching is not implemented yet)");
+    eprintln!("    check [index-file]     Check how many documents are indexed in the file (Default: index.json)");
     eprintln!("    serve [address]        Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
 }
 
@@ -315,10 +358,12 @@ fn entry() -> io::Result<()> {
         }
 
         "check" => {
-            let index_path = args.next().unwrap_or_else(|| {
-                println!("{}: No index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-                exit(1);
-            });
+            // May be remove the default 'index.json' and ask user to provide path 
+            // let index_path = args.next().unwrap_or_else(|| {
+            //     println!("{}: No index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+            //     exit(1);
+            // });
+            let index_path = args.next().unwrap_or("index.json".to_string());
 
             check_index(&index_path).unwrap_or_else(|err| {
                 println!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
