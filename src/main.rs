@@ -1,11 +1,11 @@
 use std:: {
+    collections::HashMap, 
+    env::{self}, 
     fs::{self, File}, 
     io::{self}, 
-    env::{self}, 
+    path::{Path, PathBuf}, 
     process::{exit, ExitCode}, 
-    path::{PathBuf, Path}, 
-    collections::HashMap, 
-    str::{self},
+    str::{self}
 };
 
 use xml::{self, reader::XmlEvent, EventReader};
@@ -72,13 +72,13 @@ impl<'a> Lexer<'a> {
             return Some(result.iter().map(|x| x.to_ascii_uppercase()).collect());
         }
         
-        let unwanted_symbols  = &[',', ';', '*', '/', '?', '{', '}', '(', ')', '.', '$', '_', '-'];
+        // // Ignore single-character unwanted punctuation
+        // let unwanted_symbols  = &[',', ';', '*', '/', '?', '{', '}', '(', ')', '.', '$', '_', '-'];
         
-        // Ignore single-character unwanted punctuation
-        if unwanted_symbols.contains(&self.content[0]) {
-            self.chop(1);   // skip this token 
-            return self.next_token();     // recursively fetch next token 
-        }
+        // if unwanted_symbols.contains(&self.content[0]) {
+        //     self.chop(1);   // skip this token 
+        //     return self.next_token();     // recursively fetch next token 
+        // }
 
         let token = self.chop(1);
         return Some(token.iter().collect());
@@ -214,15 +214,19 @@ type FreqTableIndex = HashMap::<PathBuf, FreqTable>;
 
 const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
 
-#[allow(dead_code)]
 fn fetch_index(index_fp: PathBuf) -> io::Result<FreqTableIndex> {
-    let metadata = fs::metadata(&index_fp)?;
+    let metadata = fs::metadata(&index_fp).map_err(|err|{
+        eprintln!("{}: Could not fetch metadata of {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
+    }).unwrap();
+    
     if metadata.len() == 0 {
         return Ok(FreqTableIndex::new()); // return empty index
     }
-
-    let index_file = fs::File::open(index_fp)?;
-    let index: FreqTableIndex = serde_json::from_reader(index_file)?;
+    
+    let index_file = fs::File::open(&index_fp)?;
+    let index: FreqTableIndex = serde_json::from_reader(index_file).map_err(|err| {
+        eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
+    }).unwrap();
     Ok(index)
 }
 
@@ -278,7 +282,22 @@ fn serve_404(request: Request) -> Result<(), ()> {
             });
 }
 
-fn serve_request(mut request: Request) -> Result<(), ()> {
+fn tf(term: &str, freq_table: &FreqTable) -> f32 {
+    let n = *freq_table.get(term).unwrap_or(&0) as f32;
+    let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>() as f32;   
+    n / d
+}
+
+fn idf(term: &str, index: &FreqTableIndex) -> f32 {
+    let n = index.len() as f32;
+    // NOTE: Can lead to division by 0 if term is not present in document corpus 
+    // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
+    //              -> Take either max of denom or 1 => APPROVED
+    let d  = index.values().filter(|ft| ft.contains_key(term)).count().max(1) as f32;
+    f32::log10(n / d)
+}
+
+fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), ()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
@@ -297,6 +316,7 @@ fn serve_request(mut request: Request) -> Result<(), ()> {
 
         (Method::Post, "/api/search") => {
             let mut buf = Vec::new();
+            // Read the entire body of request 
             request.as_reader().read_to_end(&mut buf).map_err(|err| {
                 eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
             })?;
@@ -305,10 +325,31 @@ fn serve_request(mut request: Request) -> Result<(), ()> {
                 eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
             })?.chars().collect::<Vec<_>>();
 
-            for token in Lexer::new(&body) {
-                println!("{:?}", token);
+            println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
+
+            let mut results = Vec::<(&Path, f32)>::new();
+            for (doc, ft) in tf_index.iter().take(10) {
+                // println!("Document: {path}", path = doc.display().to_string().cyan());
+                let mut rank = 0f32;    // Rank is value of tf * idf
+                for token in Lexer::new(&body) {
+                    // Calculate tf * idf
+                    rank += tf(&token, ft) * idf(&token, tf_index);
+                    // println!("    {token} => {tfidf}");
+                }
+                results.push((doc, rank));
             }
 
+
+            // Rank the files in desc order
+            results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).unwrap());
+            results.reverse();
+
+            println!("INFO: Document => Relevancy");
+            for i in results {
+                println!("      {} => {}", i.0.display(), i.1);
+            }
+
+            // Respond 'Ok' if successful
             request.respond(Response::from_string("Ok")).map_err(|err| {
                 eprintln!("{}: \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
             })?;
@@ -325,9 +366,9 @@ fn serve_request(mut request: Request) -> Result<(), ()> {
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index <folder> <save-path>         Index the <folder> and save the index to <save-path> (Default: index.json)");
+    eprintln!("    index <folder> [save-path]         Index the <folder> and save the index to <save-path> (Default: index.json)");
     eprintln!("    check [index-file]                 Check how many documents are indexed in the file (Default: index.json)");
-    eprintln!("    serve [address]                    Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
+    eprintln!("    serve <index-file> [address]       Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
@@ -369,19 +410,23 @@ fn entry() -> io::Result<()> {
             let index_path = args.next().unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
 
             check_index(&index_path).unwrap_or_else(|err| {
-                println!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
+                eprintln!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
                 exit(1);
             });
         }
 
         "serve" => {
-            let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let address_str = "http://".to_string() + &address + "/";   // Weird ass rust string concat
-            println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
+            let address = args.nth(2).unwrap_or("127.0.0.1:6969".to_string());
+            let address_str = "http://".to_string() + &address + "/"; 
             let server = Server::http(address).unwrap();
+            println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
+            // Default index path would be 'index.json'
+            let index_path = args.nth(3).unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
+
+            let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
             for request in server.incoming_requests() {
-                let _ = serve_request(request);
+                let _ = serve_request(&tf_index, request);
             }
         }
 

@@ -10,5 +10,5 @@ fetch("/api/search", {
     }, 
     redirect: 'follow', 
     referrerPolicy: 'no-referrer', 
-    body: "opengl window context"
-}).then((res) => console.log(res));
+    body: "How To opengl or open-gl frame buffer context window?"
+}).then((res) => console.log(res)); 
