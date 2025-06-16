@@ -10,12 +10,12 @@ use std:: {
 
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
-
-use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use colored::Colorize;
 
 mod lexer;
 use lexer::*;
+mod server;
+use server::*;
 
 /* Parse all the text (Character Events) from the XML File */
 fn read_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -188,123 +188,8 @@ fn print_statistics(index: &FreqTableIndex) {
     }
 }
 
-fn serve_static_file(request: Request, file_path: &str) -> Result<(), ()> {
-    let html_file = File::open(Path::new(file_path)).map_err(|err| {
-        eprintln!("{}: Could not open html file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_blue(), err = err.to_string().red());
-    }).unwrap();
-    
-    let res = Response::from_file(html_file);
-    return request.respond(res).map_err(|err| {
-        eprintln!("{}: Could not serve request for {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_cyan(), err = err.to_string().red());
-    });
-}
 
-fn serve_404(request: Request) -> Result<(), ()> {
-    return request.respond(Response::from_string("404")
-            .with_status_code(StatusCode(404)))
-            .map_err(|err| {
-                eprintln!("{}: Could not serve request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-            });
-}
 
-fn search_query<'a>(query: &'a [char], tf_index: &'a FreqTableIndex) -> Vec<(&'a Path, f32)>{    
-    let mut results = Vec::<(&Path, f32)>::new();
-    // Cache all the tokens and don't retokenize on each query 
-    let tokens = Lexer::new(&query).collect::<Vec<_>>();
-    for (doc, ft) in tf_index {
-        let mut rank = 0f32;   
-        for token in &tokens {
-            // Rank is value of tf-idf => tf * idf
-            rank += tf(&token, ft) * idf(&token, tf_index);
-        }
-        results.push((doc, rank));
-    }
-
-    // Rank the files in desc order
-    results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
-    results.reverse();
-    return results;
-}
-
-fn serve_api_search(mut request: Request, tf_index: &FreqTableIndex) -> Result<(), ()>{
-    let mut buf = Vec::new();
-    // Read the entire body of request 
-    request.as_reader().read_to_end(&mut buf).map_err(|err| {
-        eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-    })?;
-
-    let body = str::from_utf8(&mut buf).map_err(|err| {
-        eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-    })?.chars().collect::<Vec<_>>();
-
-    println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
-
-    let results = search_query(&body, tf_index);
-    
-    // Display document ranks
-    for (path, rank) in results.iter().take(10) {
-        println!("      {} => {}", path.display(), rank);
-    }
-
-    let content= &results.iter().take(20).collect::<Vec<_>>();
-    let json = serde_json::to_string(content).map_err(|err| {
-        eprintln!("ERROR: could not convert search results to JSON: {err}");
-    })?;
-
-    let content_header = Header::from_bytes("Content-Type", "application/json")
-                                                    .expect("Header entered is not a garbage value");
-    
-    let response = Response::from_string(json).with_header(content_header);
-    // Respond 'Ok' if successful
-    request.respond(response).map_err(|err| {
-        eprintln!("{}: \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-    })
-}
-
-fn tf(term: &str, freq_table: &FreqTable) -> f32 {
-    let n = *freq_table.get(term).unwrap_or(&0) as f32;
-    // NOTE: Can lead to division by 0 if term is not in FreqTable
-    // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
-    //              -> Take either max of denom or 1 => APPROVED
-    let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>().max(1) as f32;   
-    n / d
-}
-
-fn idf(term: &str, index: &FreqTableIndex) -> f32 {
-    let n = index.len() as f32;
-    // NOTE: Can lead to division by 0 if term is not in Document Corpus
-    let d  = index.values().filter(|ft| ft.contains_key(term)).count().max(1) as f32;
-    f32::log10(n / d)
-}
-
-fn serve_request(tf_index: &FreqTableIndex, request: Request) -> Result<(), ()> {
-    println!("{info}: Received request! method: [{req}], url: {url:?}",
-        info = "INFO".bright_cyan(), 
-        req = &request.method().as_str().bright_green(),
-        url = &request.url()
-    );
-
-    match (&request.method(), request.url()) {
-        
-        (Method::Get, "/") | (Method::Get, "/index.html") => {
-            serve_static_file(request, "src/index.html")?;
-        }
-
-        (Method::Get, "/index.js") => {
-            serve_static_file(request, "src/index.js")?;
-        }
-
-        (Method::Post, "/api/search") => {
-            serve_api_search(request, tf_index)?;
-        }
-
-        _ => {
-            serve_404(request)?
-        }
-    }
-
-    Ok(())
-}
 
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
@@ -358,11 +243,13 @@ fn entry() -> io::Result<()> {
 
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
 
-            let results = search_query(&prompt, &tf_index);
+            let results = server::search_query(&prompt, &tf_index);
 
             for (path, rank) in results.iter().take(20) {
                 println!("{path} - {rank}", path = path.display());
             }
+
+            return Ok(());
         }
 
         "check" => {
@@ -384,18 +271,10 @@ fn entry() -> io::Result<()> {
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
                 exit(1);
             });
-
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let address_str = "http://".to_string() + &address + "/"; 
-            let server = Server::http(address).unwrap();
-            println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
-
-
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
-            for request in server.incoming_requests() {
-                let _ = serve_request(&tf_index, request).ok();
-            }
-        }
+            return server_start(&address, &tf_index);
+        }   
 
         _ => {
 
