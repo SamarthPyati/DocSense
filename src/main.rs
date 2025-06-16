@@ -2,7 +2,7 @@ use std:: {
     collections::HashMap, 
     env::{self}, 
     fs::{self, File}, 
-    io::{self}, 
+    io::{self, BufReader, BufWriter}, // Use bufreader and bufwriter for additional speed
     path::{Path, PathBuf}, 
     process::{exit, ExitCode}, 
     str::{self}
@@ -15,14 +15,14 @@ use colored::Colorize;
 mod lexer;
 use lexer::*;
 mod server;
-use server::*;
+mod model;
 
 /* Parse all the text (Character Events) from the XML File */
 fn read_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
         eprintln!("{}: Could not open file {file_path}: {err}", "ERROR".bold().red(), file_path = file_path.display());
     })?;
-    let er = EventReader::new(file);
+    let er = EventReader::new(BufReader::new(file));
     let mut content = String::new();
     for event in er.into_iter() {
         let event = event.map_err(|err| {
@@ -66,7 +66,7 @@ fn index_document(fp: &Path) -> io::Result<FreqTable> {
 fn save_index(tf_index: &FreqTableIndex, index_path: &str) -> io::Result<()> {
     println!("Saving folder index to {} ...", index_path);
     let index_file = File::create(index_path)?;
-    serde_json::to_writer(index_file, tf_index).unwrap_or_else(|err| {
+    serde_json::to_writer(BufWriter::new(index_file), tf_index).unwrap_or_else(|err| {
         eprintln!("{err}: Failed to save {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = index_path, msg = err);
     });
     Ok(())
@@ -125,7 +125,7 @@ fn check_index(index_fp: &str) -> io::Result<()> {
         exit(1);
     });
     println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_fp);
-    let tf_index: FreqTableIndex = serde_json::from_reader(index_file).unwrap_or_else(|err|  {
+    let tf_index: FreqTableIndex = serde_json::from_reader(BufReader::new(index_file)).unwrap_or_else(|err|  {
         eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
         exit(1);
     });
@@ -149,7 +149,7 @@ fn fetch_index(index_fp: PathBuf) -> io::Result<FreqTableIndex> {
     }
     
     let index_file = fs::File::open(&index_fp)?;
-    let index: FreqTableIndex = serde_json::from_reader(index_file).map_err(|err| {
+    let index: FreqTableIndex = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
         eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
     }).unwrap();
     Ok(index)
@@ -243,7 +243,7 @@ fn entry() -> io::Result<()> {
 
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
 
-            let results = server::search_query(&prompt, &tf_index);
+            let results = model::search_query(&prompt, &tf_index);
 
             for (path, rank) in results.iter().take(20) {
                 println!("{path} - {rank}", path = path.display());
@@ -273,7 +273,7 @@ fn entry() -> io::Result<()> {
             });
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
-            return server_start(&address, &tf_index);
+            return server::start(&address, &tf_index);
         }   
 
         _ => {

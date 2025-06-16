@@ -1,36 +1,10 @@
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use std::{
-    self, fs::File, io::{self, ErrorKind}, path::{Path, PathBuf}, process::exit, str
+    self, fs::File, io::{self, ErrorKind}, path::{Path}, process::exit, str
 }; 
 
-use std::collections::HashMap;
 use colored::Colorize;
-
-use super::lexer::*;
-
-
-// Associative types
-type FreqTable = HashMap::<String, usize>;
-type FreqTableIndex = HashMap::<PathBuf, FreqTable>;
-
-
-fn tf(term: &str, freq_table: &FreqTable) -> f32 {
-    let n = *freq_table.get(term).unwrap_or(&0) as f32;
-    // NOTE: Can lead to division by 0 if term is not in FreqTable
-    // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
-    //              -> Take either max of denom or 1 => APPROVED
-    let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>().max(1) as f32;   
-    n / d
-}
-
-
-fn idf(term: &str, index: &FreqTableIndex) -> f32 {
-    let n = index.len() as f32;
-    // NOTE: Can lead to division by 0 if term is not in Document Corpus
-    let d  = index.values().filter(|ft| ft.contains_key(term)).count().max(1) as f32;
-    f32::log10(n / d)
-}
-
+use super::model::*;
 
 pub fn serve_404(request: Request) -> io::Result<()> {
     return request.respond(Response::from_string("404").with_status_code(StatusCode(404)));
@@ -105,27 +79,6 @@ pub fn serve_api_search(mut request: Request, tf_index: &FreqTableIndex) -> io::
     return request.respond(response);
 }
 
-
-pub fn search_query<'a>(query: &'a [char], tf_index: &'a FreqTableIndex) -> Vec<(&'a Path, f32)>{    
-    let mut results = Vec::<(&Path, f32)>::new();
-    // Cache all the tokens and don't retokenize on each query 
-    let tokens = Lexer::new(&query).collect::<Vec<_>>();
-    for (doc, ft) in tf_index {
-        let mut rank = 0f32;   
-        for token in &tokens {
-            // Rank is value of tf-idf => tf * idf
-            rank += tf(&token, ft) * idf(&token, tf_index);
-        }
-        results.push((doc, rank));
-    }
-
-    // Rank the files in desc order
-    results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
-    results.reverse();
-    return results;
-}
-
-
 pub fn serve_request(tf_index: &FreqTableIndex, request: Request) -> io::Result<()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
@@ -156,7 +109,7 @@ pub fn serve_request(tf_index: &FreqTableIndex, request: Request) -> io::Result<
 }
 
 
-pub fn server_start(address: &str, tf_index: &FreqTableIndex) -> io::Result<()> {
+pub fn start(address: &str, tf_index: &FreqTableIndex) -> io::Result<()> {
     let address_str = "http://".to_string() + &address + "/"; 
     let server = Server::http(address).map_err(|err| {
         eprintln!("{}: Could not create initiate server at {address} as \"{err}\"", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
