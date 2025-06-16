@@ -284,16 +284,16 @@ fn serve_404(request: Request) -> Result<(), ()> {
 
 fn tf(term: &str, freq_table: &FreqTable) -> f32 {
     let n = *freq_table.get(term).unwrap_or(&0) as f32;
-    let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>() as f32;   
+    // NOTE: Can lead to division by 0 if term is not present in document corpus 
+    // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
+    //              -> Take either max of denom or 1 => APPROVED
+    let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>().max(1) as f32;   
     n / d
 }
 
 fn idf(term: &str, index: &FreqTableIndex) -> f32 {
     let n = index.len() as f32;
-    // NOTE: Can lead to division by 0 if term is not present in document corpus 
-    // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
-    //              -> Take either max of denom or 1 => APPROVED
-    let d  = index.values().filter(|ft| ft.contains_key(term)).count().max(1) as f32;
+    let d  = index.values().filter(|ft| ft.contains_key(term)).count() as f32;
     f32::log10(n / d)
 }
 
@@ -328,7 +328,7 @@ fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), 
             println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
             let mut results = Vec::<(&Path, f32)>::new();
-            for (doc, ft) in tf_index.iter().take(10) {
+            for (doc, ft) in tf_index {
                 // println!("Document: {path}", path = doc.display().to_string().cyan());
                 let mut rank = 0f32;    // Rank is value of tf * idf
                 for token in Lexer::new(&body) {
@@ -339,13 +339,12 @@ fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), 
                 results.push((doc, rank));
             }
 
-
             // Rank the files in desc order
-            results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).unwrap());
+            results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
             results.reverse();
 
             println!("INFO: Document => Relevancy");
-            for i in results {
+            for i in results.iter().take(10) {
                 println!("      {} => {}", i.0.display(), i.1);
             }
 
@@ -416,13 +415,16 @@ fn entry() -> io::Result<()> {
         }
 
         "serve" => {
-            let address = args.nth(2).unwrap_or("127.0.0.1:6969".to_string());
+            let index_path = args.next().unwrap_or_else(|| {
+                eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                exit(1);
+            });
+
+            let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             let address_str = "http://".to_string() + &address + "/"; 
             let server = Server::http(address).unwrap();
             println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
-            // Default index path would be 'index.json'
-            let index_path = args.nth(3).unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
 
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
             for request in server.incoming_requests() {
