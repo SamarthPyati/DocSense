@@ -1,11 +1,5 @@
 use std:: {
-    collections::HashMap, 
-    env::{self}, 
-    fs::{self, File}, 
-    io::{self, BufReader, BufWriter}, // Use bufreader and bufwriter for additional speed
-    path::{Path, PathBuf}, 
-    process::{exit, ExitCode}, 
-    str::{self}
+    collections::HashMap, env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter}, path::{Path, PathBuf}, process::{exit, ExitCode}, str::{self}
 };
 
 use xml::{self, reader::XmlEvent, EventReader};
@@ -13,9 +7,11 @@ use xml::common::{TextPosition, Position};
 use colored::Colorize;
 
 mod lexer;
-use lexer::*;
 mod server;
 mod model;
+
+use lexer::*;   
+use crate::model::{Model};
 
 /* Parse all the text (Character Events) from the XML File */
 fn read_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -40,49 +36,30 @@ fn read_xml_file(file_path: &Path) -> Result<String, ()> {
     Ok(content)
 }
 
-/* Returns frequency table of a document containing mapping of term along with its frequency of occurence */
-fn index_document(fp: &Path) -> io::Result<FreqTable> {
-    let content = match read_xml_file(fp) {
-        Ok(content) => content,
-        Err(error) => {
-            let fp_str= fp.to_str().unwrap();
-            eprintln!("{err}: Failed to read xml file {fp}: {msg:?}", err = "ERROR".bold().red(), fp = fp_str.bright_blue(), msg = error);
-            return Ok(HashMap::new()); // Return empty map to continue
-        }
-    };
 
-    let content = content.chars().collect::<Vec<_>>();
-    let lexer = Lexer::new(&content);
-
-    let mut ft = HashMap::<String, usize>::new();
-    for token in lexer {
-        ft.entry(token).and_modify(|x| *x += 1).or_insert(1);
-    }
-
-    Ok(ft)
-}
-
-/* Save the Frequency Table Index to a path as index.json */
-fn save_index(tf_index: &FreqTableIndex, index_path: &str) -> io::Result<()> {
+/* Save the model to a path as json file */
+fn save_model(model: &Model, index_path: &str) -> io::Result<()> {
     println!("Saving folder index to {} ...", index_path);
     let index_file = File::create(index_path)?;
-    serde_json::to_writer(BufWriter::new(index_file), tf_index).unwrap_or_else(|err| {
+    serde_json::to_writer(BufWriter::new(index_file), model).unwrap_or_else(|err| {
         eprintln!("{err}: Failed to save {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = index_path, msg = err);
     });
     Ok(())
 }
 
-/* Indexes a particular folder to 'index.json' */
-fn index_folder(dir_path: &str, tf_index: &mut FreqTableIndex) -> Result<(), ()> {
+/* Indexes a folder as a json file and adds to model */
+fn append_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("{err}: Failed to read directory {dir_path} as \"{msg}\"", err = "ERROR".bold().red(), 
-                                                                            dir_path = dir_path.bold().bright_blue(), 
+                                                                            dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
                                                                             msg = err.to_string().red());
     })?;
 
     'step: for file in dir {
         let file = file.map_err(|err| {
-            eprintln!("{err}: Failed to read next file in directory {dir_path} as {msg}", err = "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), msg = err.to_string().red());
+            eprintln!("{err}: Failed to read next file in directory {dir_path} as {msg}", err = "ERROR".bold().red(), 
+                                                                                        dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
+                                                                                        msg = err.to_string().red());
         })?;
 
         let file_path = file.path();
@@ -104,16 +81,34 @@ fn index_folder(dir_path: &str, tf_index: &mut FreqTableIndex) -> Result<(), ()>
 
         if file_type.is_dir() {
             // Recursively index all the folders
-            let _ = index_folder(file_path_str, tf_index);
+            let _ = append_folder_to_model(&file_path, model);
             continue 'step;
         }   
 
         println!("Indexing {} ...", file_path_str.bright_cyan());
 
-        let tf: FreqTable = index_document(file_path.as_path()).map_err(|err| {
-            eprintln!("{err}: Failed to index document {file_path} as {msg}", err = "ERROR".bold().red(), file_path = file_path_str.bold().bright_blue(), msg = err.to_string().red());
-        })?;
-        tf_index.insert(file_path, tf);
+        let content = match read_xml_file(&file_path) {
+            Ok(content) => content.chars().collect::<Vec<_>>(),
+            Err(err) => {
+                eprintln!("{error}: Failed to read xml file {fp}: {msg:?}", error = "ERROR".bold().red(), fp = file_path.to_str().unwrap().bright_blue(), msg = err);
+                continue 'step;
+            }
+        };
+
+        let tokens = Lexer::new(&content).collect::<Vec<_>>();
+
+        let mut ft = FreqTable::new();
+
+        for token in &tokens {
+            ft.entry(token.to_owned()).and_modify(|x| *x += 1).or_insert(1);
+        }
+
+        // Update global term frequency
+        for term in ft.keys() {
+            model.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
+        }
+        
+        model.tf_index.insert(file_path, ft);
     }
     Ok(())
 }
@@ -125,11 +120,11 @@ fn check_index(index_fp: &str) -> io::Result<()> {
         exit(1);
     });
     println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_fp);
-    let tf_index: FreqTableIndex = serde_json::from_reader(BufReader::new(index_file)).unwrap_or_else(|err|  {
+    let model: Model = serde_json::from_reader(BufReader::new(index_file)).unwrap_or_else(|err|  {
         eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
         exit(1);
     });
-    println!("{info}: Index file has {entries} entries", info = "INFO".bright_cyan(), entries = tf_index.len());
+    println!("{info}: Index file has {entries} entries", info = "INFO".bright_cyan(), entries = model.tf_index.len());
     Ok(())  
 }
 
@@ -139,17 +134,17 @@ type FreqTableIndex = HashMap::<PathBuf, FreqTable>;
 
 const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
 
-fn fetch_index(index_fp: PathBuf) -> io::Result<FreqTableIndex> {
+fn fetch_index(index_fp: PathBuf) -> io::Result<Model> {
     let metadata = fs::metadata(&index_fp).map_err(|err|{
         eprintln!("{}: Could not fetch metadata of {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
     }).unwrap();
     
     if metadata.len() == 0 {
-        return Ok(FreqTableIndex::new()); // return empty index
+        return Ok(Model { gtf: HashMap::new(), tf_index: HashMap::new() }); // return empty index to continue
     }
     
     let index_file = fs::File::open(&index_fp)?;
-    let index: FreqTableIndex = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
+    let index: Model = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
         eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
     }).unwrap();
     Ok(index)
@@ -189,15 +184,13 @@ fn print_statistics(index: &FreqTableIndex) {
 }
 
 
-
-
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index <folder> [save-path]         Index the <folder> containing XML/XHTML files and save the index to [save-path] (Default: index.json)");
+    eprintln!("    index  <folder> [save-path]        Index the <folder> containing XML/XHTML files and save the index to [save-path] (Default: index.json)");
     eprintln!("    search <index-file> <prompt>       Search query within a index file. (Default: Shows top 20 search results)");
-    eprintln!("    check [index-file]                 Quickly check how many documents are present in a saved index file (Default: index.json)");
-    eprintln!("    serve <index-file> [address]       Starts an HTTP server with Web Interface based on a pre-built index (Default: localhost:6969)");
+    eprintln!("    check  [index-file]                Quickly check how many documents are present in a saved index file (Default: index.json)");
+    eprintln!("    serve  <index-file> [address]      Starts an HTTP server with Web Interface based on a pre-built index (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
@@ -218,16 +211,14 @@ fn entry() -> io::Result<()> {
                 exit(1);
             });
 
-            let mut tf_index: FreqTableIndex = FreqTableIndex::new();
+            let mut model = Model::default();
 
-            let _ = index_folder(&dir_path,&mut tf_index).map_err(|err| {
+            let _ = append_folder_to_model(Path::new(&dir_path), &mut model).map_err(|err| {
                 eprintln!("{}: Failed to index folder {dir_path} as \"{err:?}\"", "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), err = err);
             });
 
             let save_path = args.next().unwrap_or("index.json".to_string());
-            let save_path= save_path.as_str();
-            // Default path is set to 'index.json'
-            save_index(&tf_index, save_path)?;
+            save_model(&model, save_path.as_str())?;
         }
 
         "search" => {
@@ -241,9 +232,9 @@ fn entry() -> io::Result<()> {
                 exit(1);
             }).chars().collect::<Vec<char>>();
 
-            let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
+            let model = fetch_index(Path::new(&index_path).to_path_buf())?;
 
-            let results = model::search_query(&prompt, &tf_index);
+            let results = model::search_query(&prompt, &model);
 
             for (path, rank) in results.iter().take(20) {
                 println!("{path} - {rank}", path = path.display());

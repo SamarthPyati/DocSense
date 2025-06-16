@@ -7,6 +7,7 @@ name = "DocSense"
 version = "0.1.0"
 dependencies = [
  "colored",
+ "serde",
  "serde_json",
  "tiny_http",
  "xml-rs",
