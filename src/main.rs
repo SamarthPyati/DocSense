@@ -365,9 +365,10 @@ fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), 
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index <folder> [save-path]         Index the <folder> and save the index to <save-path> (Default: index.json)");
-    eprintln!("    check [index-file]                 Check how many documents are indexed in the file (Default: index.json)");
-    eprintln!("    serve <index-file> [address]       Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
+    eprintln!("    index <folder> [save-path]         Index the <folder> containing XML/XHTML files and save the index to [save-path] (Default: index.json)");
+    eprintln!("    check [index-file]                 Quickly check how many documents are present in a saved index file (Default: index.json)");
+    eprintln!("    serve <index-file> [address]       Starts an HTTP server that allows you to submit search queries and receive ranked results");
+    eprintln!("                                       based on a pre-built index (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
