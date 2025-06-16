@@ -1,11 +1,12 @@
-use std::fs::{self, File};
-use std::io::{self};
-use std::env::{self};
-use std::process::{exit, ExitCode};
-use std::path::{PathBuf, Path};
-use std::collections::HashMap;
-use std::result;
-use std::str::{self};
+use std:: {
+    fs::{self, File}, 
+    io::{self}, 
+    env::{self}, 
+    process::{exit, ExitCode}, 
+    path::{PathBuf, Path}, 
+    collections::HashMap, 
+    str::{self},
+};
 
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
@@ -137,8 +138,7 @@ fn index_document(fp: &Path) -> io::Result<FreqTable> {
 }
 
 /* Save the Frequency Table Index to a path as index.json */
-fn save_index(tf_index: &FreqTableIndex, index_path: Option<&'static str>) -> io::Result<()> {
-    let index_path = index_path.unwrap_or(DEFAULT_INDEX_FILE_PATH);
+fn save_index(tf_index: &FreqTableIndex, index_path: &str) -> io::Result<()> {
     println!("Saving folder index to {} ...", index_path);
     let index_file = File::create(index_path)?;
     serde_json::to_writer(index_file, tf_index).unwrap_or_else(|err| {
@@ -199,12 +199,12 @@ fn check_index(index_fp: &str) -> io::Result<()> {
         eprintln!("{}: Could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bright_blue(), err = err.to_string().red());
         exit(1);
     });
-    println!("Reading {} file ...", index_fp);
+    println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_fp);
     let tf_index: FreqTableIndex = serde_json::from_reader(index_file).unwrap_or_else(|err|  {
         eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
         exit(1);
     });
-    println!("Index file has {} entries.", tf_index.len());
+    println!("{info}: Index file has {entries} entries", info = "INFO".bright_cyan(), entries = tf_index.len());
     Ok(())  
 }
 
@@ -325,9 +325,9 @@ fn serve_request(mut request: Request) -> Result<(), ()> {
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index <folder>         Index the <folder> and save the index to index.json file");
-    eprintln!("    check [index-file]     Check how many documents are indexed in the file (Default: index.json)");
-    eprintln!("    serve [address]        Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
+    eprintln!("    index <folder> <save-path>         Index the <folder> and save the index to <save-path> (Default: index.json)");
+    eprintln!("    check [index-file]                 Check how many documents are indexed in the file (Default: index.json)");
+    eprintln!("    serve [address]                    Opens a HTTP Server to specified address for getting query (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
@@ -353,8 +353,11 @@ fn entry() -> io::Result<()> {
             let _ = index_folder(&dir_path,&mut tf_index).map_err(|err| {
                 eprintln!("{}: Failed to index folder {dir_path} as \"{err:?}\"", "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), err = err);
             });
-            // Gave "None" as default path is 'index.json'
-            save_index(&tf_index, None)?;
+
+            let save_path = args.next().unwrap_or("index.json".to_string());
+            let save_path= save_path.as_str();
+            // Default path is set to 'index.json'
+            save_index(&tf_index, save_path)?;
         }
 
         "check" => {
@@ -363,7 +366,7 @@ fn entry() -> io::Result<()> {
             //     println!("{}: No index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
             //     exit(1);
             // });
-            let index_path = args.next().unwrap_or("index.json".to_string());
+            let index_path = args.next().unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
 
             check_index(&index_path).unwrap_or_else(|err| {
                 println!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
