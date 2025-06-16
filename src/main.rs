@@ -282,6 +282,25 @@ fn serve_404(request: Request) -> Result<(), ()> {
             });
 }
 
+fn search_query<'a>(query: &'a [char], tf_index: &'a FreqTableIndex) -> Vec<(&'a Path, f32)>{    
+    let mut results = Vec::<(&Path, f32)>::new();
+    // Cache all the tokens and don't retokenize on each query 
+    let tokens = Lexer::new(&query).collect::<Vec<_>>();
+    for (doc, ft) in tf_index {
+        let mut rank = 0f32;   
+        for token in &tokens {
+            // Rank is value of tf-idf => tf * idf
+            rank += tf(&token, ft) * idf(&token, tf_index);
+        }
+        results.push((doc, rank));
+    }
+
+    // Rank the files in desc order
+    results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
+    results.reverse();
+    return results;
+}
+
 fn serve_api_search(mut request: Request, tf_index: &FreqTableIndex) -> Result<(), ()>{
     let mut buf = Vec::new();
     // Read the entire body of request 
@@ -295,22 +314,8 @@ fn serve_api_search(mut request: Request, tf_index: &FreqTableIndex) -> Result<(
 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
-    let mut results = Vec::<(&Path, f32)>::new();
-    for (doc, ft) in tf_index {
-        // println!("Document: {path}", path = doc.display().to_string().cyan());
-        let mut rank = 0f32;    // Rank is value of tf * idf
-        for token in Lexer::new(&body) {
-            // Calculate tf * idf
-            rank += tf(&token, ft) * idf(&token, tf_index);
-            // println!("    {token} => {tfidf}");
-        }
-        results.push((doc, rank));
-    }
-
-    // Rank the files in desc order
-    results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
-    results.reverse();
-
+    let results = search_query(&body, tf_index);
+    
     // Display document ranks
     for (path, rank) in results.iter().take(10) {
         println!("      {} => {}", path.display(), rank);
@@ -347,7 +352,7 @@ fn idf(term: &str, index: &FreqTableIndex) -> f32 {
     f32::log10(n / d)
 }
 
-fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), ()> {
+fn serve_request(tf_index: &FreqTableIndex, request: Request) -> Result<(), ()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
@@ -380,9 +385,9 @@ fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
     eprintln!("    index <folder> [save-path]         Index the <folder> containing XML/XHTML files and save the index to [save-path] (Default: index.json)");
+    eprintln!("    search <index-file> <prompt>       Search query within a index file. (Default: Shows top 20 search results)");
     eprintln!("    check [index-file]                 Quickly check how many documents are present in a saved index file (Default: index.json)");
-    eprintln!("    serve <index-file> [address]       Starts an HTTP server that allows you to submit search queries and receive ranked results");
-    eprintln!("                                       based on a pre-built index (Default: localhost:6969)");
+    eprintln!("    serve <index-file> [address]       Starts an HTTP server with Web Interface based on a pre-built index (Default: localhost:6969)");
 }
 
 fn entry() -> io::Result<()> {
@@ -415,6 +420,26 @@ fn entry() -> io::Result<()> {
             save_index(&tf_index, save_path)?;
         }
 
+        "search" => {
+            let index_path = args.next().unwrap_or_else(|| {
+                eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                exit(1);
+            });
+
+            let prompt = args.next().unwrap_or_else(|| {
+                eprintln!("{}: Prompt must be provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                exit(1);
+            }).chars().collect::<Vec<char>>();
+
+            let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
+
+            let results = search_query(&prompt, &tf_index);
+
+            for (path, rank) in results.iter().take(20) {
+                println!("{path} - {rank}", path = path.display());
+            }
+        }
+
         "check" => {
             // May be remove the default 'index.json' and ask user to provide path 
             // let index_path = args.next().unwrap_or_else(|| {
@@ -436,8 +461,8 @@ fn entry() -> io::Result<()> {
             });
 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let server = Server::http(address).unwrap();
             let address_str = "http://".to_string() + &address + "/"; 
+            let server = Server::http(address).unwrap();
             println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
 

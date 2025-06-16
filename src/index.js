@@ -22,7 +22,7 @@ async function search(prompt) {
             item.appendChild(document.createTextNode("No such token found"));
             item.appendChild(document.createElement("br"));    
         }
-        
+
         let item = document.createElement("span");
         item.appendChild(document.createTextNode(path));
         item.appendChild(document.createElement("br"));
@@ -31,9 +31,11 @@ async function search(prompt) {
 }
 
 let query = document.getElementById("query");
-
+let currentSearch = Promise.resolve();
 query.addEventListener("keypress", (e) => {
         if (e.key == "Enter") {
-            search(query.value);
+            currentSearch.then(() => {
+                search(query.value);
+            });
         }
 })
