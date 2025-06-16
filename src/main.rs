@@ -11,7 +11,7 @@ use std:: {
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
 
-use tiny_http::{Method, Request, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use colored::Colorize;
 
 #[derive(Debug)]
@@ -282,9 +282,58 @@ fn serve_404(request: Request) -> Result<(), ()> {
             });
 }
 
+fn serve_api_search(mut request: Request, tf_index: &FreqTableIndex) -> Result<(), ()>{
+    let mut buf = Vec::new();
+    // Read the entire body of request 
+    request.as_reader().read_to_end(&mut buf).map_err(|err| {
+        eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+    })?;
+
+    let body = str::from_utf8(&mut buf).map_err(|err| {
+        eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+    })?.chars().collect::<Vec<_>>();
+
+    println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
+
+    let mut results = Vec::<(&Path, f32)>::new();
+    for (doc, ft) in tf_index {
+        // println!("Document: {path}", path = doc.display().to_string().cyan());
+        let mut rank = 0f32;    // Rank is value of tf * idf
+        for token in Lexer::new(&body) {
+            // Calculate tf * idf
+            rank += tf(&token, ft) * idf(&token, tf_index);
+            // println!("    {token} => {tfidf}");
+        }
+        results.push((doc, rank));
+    }
+
+    // Rank the files in desc order
+    results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
+    results.reverse();
+
+    // Display document ranks
+    for (path, rank) in results.iter().take(10) {
+        println!("      {} => {}", path.display(), rank);
+    }
+
+    let content= &results.iter().take(20).collect::<Vec<_>>();
+    let json = serde_json::to_string(content).map_err(|err| {
+        eprintln!("ERROR: could not convert search results to JSON: {err}");
+    })?;
+
+    let content_header = Header::from_bytes("Content-Type", "application/json")
+                                                    .expect("Header entered is not a garbage value");
+    
+    let response = Response::from_string(json).with_header(content_header);
+    // Respond 'Ok' if successful
+    request.respond(response).map_err(|err| {
+        eprintln!("{}: \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+    })
+}
+
 fn tf(term: &str, freq_table: &FreqTable) -> f32 {
     let n = *freq_table.get(term).unwrap_or(&0) as f32;
-    // NOTE: Can lead to division by 0 if term is not present in document corpus 
+    // NOTE: Can lead to division by 0 if term is not in FreqTable
     // Workaround:  -> (So add 1 to denominator to prevent that (Getting negative values => REJECTED))
     //              -> Take either max of denom or 1 => APPROVED
     let d = freq_table.iter().map(|(_, c)| *c).sum::<usize>().max(1) as f32;   
@@ -293,7 +342,8 @@ fn tf(term: &str, freq_table: &FreqTable) -> f32 {
 
 fn idf(term: &str, index: &FreqTableIndex) -> f32 {
     let n = index.len() as f32;
-    let d  = index.values().filter(|ft| ft.contains_key(term)).count() as f32;
+    // NOTE: Can lead to division by 0 if term is not in Document Corpus
+    let d  = index.values().filter(|ft| ft.contains_key(term)).count().max(1) as f32;
     f32::log10(n / d)
 }
 
@@ -315,43 +365,7 @@ fn serve_request(tf_index: &FreqTableIndex, mut request: Request) -> Result<(), 
         }
 
         (Method::Post, "/api/search") => {
-            let mut buf = Vec::new();
-            // Read the entire body of request 
-            request.as_reader().read_to_end(&mut buf).map_err(|err| {
-                eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-            })?;
-
-            let body = str::from_utf8(&mut buf).map_err(|err| {
-                eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-            })?.chars().collect::<Vec<_>>();
-
-            println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
-
-            let mut results = Vec::<(&Path, f32)>::new();
-            for (doc, ft) in tf_index {
-                // println!("Document: {path}", path = doc.display().to_string().cyan());
-                let mut rank = 0f32;    // Rank is value of tf * idf
-                for token in Lexer::new(&body) {
-                    // Calculate tf * idf
-                    rank += tf(&token, ft) * idf(&token, tf_index);
-                    // println!("    {token} => {tfidf}");
-                }
-                results.push((doc, rank));
-            }
-
-            // Rank the files in desc order
-            results.sort_by(|(_, ra), (_, rb)| ra.partial_cmp(rb).expect("Compared with NaN values"));
-            results.reverse();
-
-            println!("INFO: Document => Relevancy");
-            for i in results.iter().take(10) {
-                println!("      {} => {}", i.0.display(), i.1);
-            }
-
-            // Respond 'Ok' if successful
-            request.respond(Response::from_string("Ok")).map_err(|err| {
-                eprintln!("{}: \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
-            })?;
+            serve_api_search(request, tf_index)?;
         }
 
         _ => {
@@ -422,14 +436,14 @@ fn entry() -> io::Result<()> {
             });
 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let address_str = "http://".to_string() + &address + "/"; 
             let server = Server::http(address).unwrap();
+            let address_str = "http://".to_string() + &address + "/"; 
             println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
 
             let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
             for request in server.incoming_requests() {
-                let _ = serve_request(&tf_index, request);
+                let _ = serve_request(&tf_index, request).ok();
             }
         }
 
