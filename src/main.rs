@@ -10,8 +10,7 @@ mod lexer;
 mod server;
 mod model;
 
-use lexer::*;   
-use crate::model::{Model};
+use crate::model::{InMemoryModel, Model, SqliteModel};
 
 /* Parse all the text (Character Events) from the XML File */
 fn read_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -38,17 +37,22 @@ fn read_xml_file(file_path: &Path) -> Result<String, ()> {
 
 
 /* Save the model to a path as json file */
-fn save_model(model: &Model, index_path: &str) -> io::Result<()> {
+#[allow(dead_code)]
+fn save_model(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
     println!("Saving folder index to {} ...", index_path);
-    let index_file = File::create(index_path)?;
+    
+    let index_file = File::create(index_path).map_err(|err| {
+        eprintln!("{err}: Failed to create file {path} as {msg}", err = "ERROR".bold().red(), path = index_path.bright_blue(), msg = err.to_string().red());
+    })?;
+
     serde_json::to_writer(BufWriter::new(index_file), model).unwrap_or_else(|err| {
-        eprintln!("{err}: Failed to save {fp:?}: {msg:?}", err = "ERROR".bold().red(), fp = index_path, msg = err);
+        eprintln!("{err}: Failed to save file {path} as {msg}", err = "ERROR".bold().red(), path = index_path.bright_blue(), msg = err.to_string().red());
     });
     Ok(())
 }
 
 /* Indexes a folder as a json file and adds to model */
-fn append_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> {
+fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("{err}: Failed to read directory {dir_path} as \"{msg}\"", err = "ERROR".bold().red(), 
                                                                             dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
@@ -79,8 +83,8 @@ fn append_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> 
             eprintln!("{err}: Failed to determine file type for {file_path} as {msg}", err = "ERROR".bold().red(), file_path = file_path_str.bold().bright_blue(), msg = err.to_string().red());
         })?;
 
+        // Recursively index all the folders
         if file_type.is_dir() {
-            // Recursively index all the folders
             let _ = append_folder_to_model(&file_path, model);
             continue 'step;
         }   
@@ -95,94 +99,44 @@ fn append_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> 
             }
         };
 
-        let tokens = Lexer::new(&content).collect::<Vec<_>>();
-
-        let mut ft = FreqTable::new();
-        for token in &tokens {
-            ft.entry(token.to_owned()).and_modify(|x| *x += 1).or_insert(1);
-        }
-        
-        let term_count = ft.iter().map(|(_, c)| *c).sum();
-
-        // Update global term frequency
-        for term in ft.keys() {
-            model.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
-        }
-        model.tf_index.insert(file_path, (term_count, ft));
+        let _ = model.add_document(file_path, &content);
     }
     Ok(())
 }
 
 /* Check the amount of files present in the main frequency table index */
-fn check_index(index_fp: &str) -> io::Result<()> {
-    let index_file = fs::File::open(index_fp).unwrap_or_else(|err| {
-        eprintln!("{}: Could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bright_blue(), err = err.to_string().red());
+fn check_index(index_path: &str) -> Result<(), ()> {
+    let index_file = fs::File::open(index_path).map_err(|err| {
+        eprintln!("{}: Could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_path.bright_blue(), err = err.to_string().red());
         exit(1);
-    });
-    println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_fp);
-    let model: Model = serde_json::from_reader(BufReader::new(index_file)).unwrap_or_else(|err|  {
-        eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_fp.to_string().bold(), err = err.to_string().red());
+    })?;
+
+    println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_path.bright_blue());
+    let model: InMemoryModel = serde_json::from_reader(BufReader::new(index_file)).map_err(|err|  {
+        eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_path.bright_blue(), err = err.to_string().red());
         exit(1);
-    });
+    })?;
     println!("{info}: Index file has {entries} entries", info = "INFO".bright_cyan(), entries = model.tf_index.len());
     Ok(())  
 }
 
-// Associative types
-type FreqTable = HashMap::<String, usize>;
-type FreqTableIndex = HashMap::<PathBuf, FreqTable>;
-
 const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
 
-fn fetch_index(index_fp: PathBuf) -> io::Result<Model> {
-    let metadata = fs::metadata(&index_fp).map_err(|err|{
-        eprintln!("{}: Could not fetch metadata of {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
+fn fetch_model(index_path: &str) -> io::Result<InMemoryModel> {
+    let metadata = fs::metadata(&index_path).map_err(|err|{
+        eprintln!("{}: Could not fetch metadata of {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
     }).unwrap();
     
     if metadata.len() == 0 {
-        return Ok(Model { gtf: HashMap::new(), tf_index: HashMap::new() }); // return empty index to continue
+        return Ok(InMemoryModel{ gtf: HashMap::new(), tf_index: HashMap::new() }); // return empty index to continue
     }
-    
-    let index_file = fs::File::open(&index_fp)?;
-    let index: Model = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
-        eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_fp.to_str().unwrap().bright_blue(), err = err.to_string().red());
+
+    let index_file = fs::File::open(&index_path)?;
+    let model: InMemoryModel = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
+        eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
     }).unwrap();
-    Ok(index)
+    Ok(model)
 }
-
-#[allow(dead_code)]
-fn update_index(index_fp: PathBuf, tf_index: &FreqTableIndex) -> io::Result<()>{
-    let metadata = fs::metadata(&index_fp)?;
-    if metadata.len() == 0 {
-        println!("NOTE: Empty {:?} file, writing to it ...", index_fp);
-        let index_file = fs::File::create(index_fp)?;
-        serde_json::to_writer(index_file, &tf_index).expect("Saved index.json file to disk.");
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn print_statistics(index: &FreqTableIndex) {
-    for (i, (file_path, freq_table)) in index.iter().enumerate() {
-
-        /* Printing Statistics */
-        let mut stats = freq_table.iter().collect::<Vec<_>>();
-        stats.sort_by_key(|(_, freq)| *freq);
-        stats.reverse();
-        
-        let file_path_string = file_path.to_str().unwrap().to_string();
-        /* Print Top 10 most frequently occuring terms */
-        println!("{} #{}: {file_path:} ", 
-                                "FILE".italic().underline(), 
-                                (i + 1).to_string().bold().italic(), 
-                                file_path = file_path_string.bold().bright_blue());
-    
-        for (term, freq) in stats.iter().take(20) {
-            println!("   {term} : {freq}");
-        }    
-    }
-}
-
 
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
@@ -211,14 +165,17 @@ fn entry() -> io::Result<()> {
                 exit(1);
             });
 
-            let mut model = Model::default();
+            let index_path = "index.db";
+            let mut model = SqliteModel::open(Path::new(index_path)).unwrap();
 
+            let _ = model.begin();
             let _ = append_folder_to_model(Path::new(&dir_path), &mut model).map_err(|err| {
                 eprintln!("{}: Failed to index folder {dir_path} as \"{err:?}\"", "ERROR".bold().red(), dir_path = dir_path.bold().bright_blue(), err = err);
             });
+            let _ = model.commit();
 
-            let save_path = args.next().unwrap_or("index.json".to_string());
-            save_model(&model, save_path.as_str())?;
+            // let save_path = args.next().unwrap_or("index.json".to_string());
+            // save_model(&model, save_path.as_str())?;
         }
 
         "search" => {
@@ -232,11 +189,9 @@ fn entry() -> io::Result<()> {
                 exit(1);
             }).chars().collect::<Vec<char>>();
 
-            let model = fetch_index(Path::new(&index_path).to_path_buf())?;
+            let model: InMemoryModel = fetch_model(&index_path).unwrap();
 
-            let results = model::search_query(&prompt, &model);
-
-            for (path, rank) in results.iter().take(20) {
+            for (path, rank) in model.search_query(&prompt).unwrap().iter().take(20) {
                 println!("{path} - {rank}", path = path.display());
             }
 
@@ -244,17 +199,9 @@ fn entry() -> io::Result<()> {
         }
 
         "check" => {
-            // May be remove the default 'index.json' and ask user to provide path 
-            // let index_path = args.next().unwrap_or_else(|| {
-            //     println!("{}: No index path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            //     exit(1);
-            // });
             let index_path = args.next().unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
 
-            check_index(&index_path).unwrap_or_else(|err| {
-                eprintln!("{}: Could not check index file {index_path} as \"{err}\"", "ERROR".bold().red());
-                exit(1);
-            });
+            check_index(&index_path).unwrap();
         }
 
         "serve" => {
@@ -262,9 +209,11 @@ fn entry() -> io::Result<()> {
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
                 exit(1);
             });
+
+            let model: InMemoryModel = fetch_model(&index_path).unwrap();
+
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let tf_index = fetch_index(Path::new(&index_path).to_path_buf())?;
-            return server::start(&address, &tf_index);
+            return server::start(&address, &model);
         }   
 
         _ => {

@@ -37,7 +37,7 @@ pub fn serve_static_file(request: Request, file_path: &str) -> io::Result<()> {
 }
 
 
-pub fn serve_api_search(mut request: Request, model: &Model) -> io::Result<()>{
+pub fn serve_api_search(mut request: Request, model: &InMemoryModel) -> io::Result<()>{
     let mut buf = Vec::new();
     // Read the entire body of request 
     if let Err(err) = request.as_reader().read_to_end(&mut buf) {
@@ -55,7 +55,7 @@ pub fn serve_api_search(mut request: Request, model: &Model) -> io::Result<()>{
 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
-    let results = search_query(&body, model);
+    let results = model.search_query(&body).unwrap();
     
     // Display document ranks
     for (path, rank) in results.iter().take(10) {
@@ -79,7 +79,7 @@ pub fn serve_api_search(mut request: Request, model: &Model) -> io::Result<()>{
     return request.respond(response);
 }
 
-pub fn serve_request(model: &Model, request: Request) -> io::Result<()> {
+pub fn serve_request(model: &InMemoryModel, request: Request) -> io::Result<()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
@@ -109,7 +109,7 @@ pub fn serve_request(model: &Model, request: Request) -> io::Result<()> {
 }
 
 
-pub fn start(address: &str, model: &Model) -> io::Result<()> {
+pub fn start(address: &str, model: &InMemoryModel) -> io::Result<()> {
     let address_str = "http://".to_string() + &address + "/"; 
     let server = Server::http(address).map_err(|err| {
         eprintln!("{}: Could not create initiate server at {address} as \"{err}\"", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
@@ -126,3 +126,4 @@ pub fn start(address: &str, model: &Model) -> io::Result<()> {
     eprintln!("{}: Server socket has shutdown", "ERROR".bold().red());
     Ok(())
 }
+    
