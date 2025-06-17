@@ -98,17 +98,17 @@ fn append_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> 
         let tokens = Lexer::new(&content).collect::<Vec<_>>();
 
         let mut ft = FreqTable::new();
-
         for token in &tokens {
             ft.entry(token.to_owned()).and_modify(|x| *x += 1).or_insert(1);
         }
+        
+        let term_count = ft.iter().map(|(_, c)| *c).sum();
 
         // Update global term frequency
         for term in ft.keys() {
             model.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
         }
-        
-        model.tf_index.insert(file_path, ft);
+        model.tf_index.insert(file_path, (term_count, ft));
     }
     Ok(())
 }
