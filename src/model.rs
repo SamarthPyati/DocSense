@@ -19,10 +19,6 @@ pub struct SqliteModel {
     connection: sqlite::Connection
 }
 
-fn log_and_ignore(err: impl std::error::Error) {
-    eprintln!("{ERROR}: {err}", ERROR = "ERROR".bold().red(), err = err.to_string().red());
-}
-
 impl SqliteModel {
     pub fn execute(&self, statement: &str) -> Result<(), ()> {
         self.connection.execute(statement).map_err(|err| {
@@ -88,15 +84,63 @@ impl Model for SqliteModel {
     }
 
     fn add_document(&mut self, path: PathBuf, content: &[char]) -> Result<(), ()> {
-        let query = "INSERT INTO Documents (path, term_count) VALUES (:path, :count)";
-        let mut insert = self.connection.prepare(query).map_err(|err| {
-            eprintln!("{}: Failed to execute query {query} as {err}", "ERROR".bold().red(), query = query.bright_blue(), err = err.to_string().red());
-        })?;
+        let terms = Lexer::new(content).collect::<Vec<_>>();   
 
-        // TODO: using path.display() is probably bad in here
-        insert.bind((":path", path.display().to_string().as_str())).map_err(log_and_ignore)?;
-        insert.bind((":count", Lexer::new(content).count() as i64)).map_err(log_and_ignore)?;
-        insert.next().map_err(log_and_ignore)?;
+        
+        let doc_id = {
+            let query = "INSERT INTO Documents (path, term_count) VALUES (:path, :count)";
+            
+            let log_err = |err: sqlite::Error| {
+                eprintln!("{ERROR}: Could not execute query {query} as {err}", ERROR = "ERROR".bold().red(), err = err.to_string().red());
+            };
+
+            let mut stmt = self.connection.prepare(query).map_err(log_err)?;
+            stmt.bind_iter::<_, (_, sqlite::Value)>([
+                (":path", path.display().to_string().as_str().into()),
+                (":count", (terms.len() as i64).into()),
+            ]).map_err(log_err)?;
+            stmt.next().map_err(log_err)?;
+
+            unsafe {
+                sqlite3_sys::sqlite3_last_insert_rowid(self.connection.as_raw())
+            }
+        };
+
+        for term in terms {
+            let freq = {
+                let query = "SELECT freq from FreqTable WHERE doc_id = :doc_id AND TERM :term";
+                
+                let log_err = |err: sqlite::Error| {
+                    eprintln!("{ERROR}: Could not execute query {query} as {err}", ERROR = "ERROR".bold().red(), err = err.to_string().red());
+                };
+
+                let mut stmt = self.connection.prepare(query).map_err(log_err)?;   
+
+                stmt.bind_iter::<_, (_, sqlite::Value)>([
+                    (":doc_id", doc_id.into()),
+                    (":term", term.as_str().into()),
+                ]).map_err(log_err)?;
+
+                match stmt.next().map_err(log_err)? {
+                    sqlite::State::Done => stmt.read::<i64, _>("freq").map_err(log_err)?, 
+                    sqlite::State::Row => 0 
+                }
+            };
+
+            // TODO: Find better way to autoincrement the frequency
+            let query = "INSERT OR REPLACE INTO FreqTable(doc_id, term, freq) VALUES (:doc_id, :term, :freq)";
+            let log_err = |err: sqlite::Error| {
+                    eprintln!("{ERROR}: Could not execute query {query} as {err}", ERROR = "ERROR".bold().red(), err = err.to_string().red());
+            };
+
+            let mut stmt = self.connection.prepare(query).map_err(log_err)?;   
+            stmt.bind_iter::<_, (_, sqlite::Value)>([
+                (":doc_id", doc_id.into()),
+                (":term", term.as_str().into()),
+                (":freq", (freq + 1).into()),
+            ]).map_err(log_err)?;
+            stmt.next().map_err(log_err)?;
+        }
 
         Ok(())
     }
