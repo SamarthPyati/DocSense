@@ -4,6 +4,7 @@ use std::{
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::default::Default;
 use super::lexer::*;
 
 use sqlite::{self};
