@@ -77,11 +77,28 @@ impl SqliteModel {
 
         Ok(this)
     }
+
+    pub fn check(&self) -> Result<u64, ()> {
+        let count = {
+            let query = "SELECT COUNT(*) as count FROM Documents";
+            let log_err = |err: sqlite::Error| {
+                eprintln!("{ERROR}: Could not execute query {query} as {err}", ERROR = "ERROR".bold().red(), err = err.to_string().red());
+            };
+
+            let mut stmt = self.connection.prepare(query).map_err(log_err)?;   
+            match stmt.next().map_err(log_err)? {
+                sqlite::State::Row => stmt.read::<i64, _>("count").map_err(log_err)?, 
+                sqlite::State::Done => 0, 
+            }
+        };
+        Ok(count as u64)
+    }
+    
 }
 
 impl Model for SqliteModel {
     fn search_query(&self, query: &[char]) -> Result<Vec<(PathBuf, f32)>, ()> {
-        todo!("SqliteModel::search_query()")
+        todo!("SqliteModel::search_query()");
     }
     
     fn add_document(&mut self, path: PathBuf, content: &[char]) -> Result<(), ()> {

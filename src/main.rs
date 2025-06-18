@@ -4,7 +4,7 @@ use std:: {
 
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 
 mod lexer;
 mod server;
@@ -13,7 +13,7 @@ mod model;
 use crate::model::{InMemoryModel, Model, SqliteModel};
 
 /* Parse all the text (Character Events) from the XML File */
-fn read_xml_file(file_path: &Path) -> Result<String, ()> {
+fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
         eprintln!("{}: Could not open file {file_path}: {err}", "ERROR".bold().red(), file_path = file_path.display());
     })?;
@@ -84,13 +84,13 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
 
         // Recursively index all the folders
         if file_type.is_dir() {
-            let _ = append_folder_to_model(&file_path, model);
+            append_folder_to_model(&file_path, model)?;
             continue 'step;
         }   
 
         println!("Indexing {} ...", file_path_str.bright_cyan());
 
-        let content = match read_xml_file(&file_path) {
+        let content = match parse_xml_file(&file_path) {
             Ok(content) => content.chars().collect::<Vec<_>>(),
             Err(err) => {
                 eprintln!("{error}: Failed to read xml file {fp}: {msg:?}", error = "ERROR".bold().red(), fp = file_path.to_str().unwrap().bright_blue(), msg = err);
@@ -98,7 +98,8 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
             }
         };
 
-        let _ = model.add_document(file_path, &content);
+        // Core Operation
+        model.add_document(file_path, &content)?;
     }
     Ok(())
 }
@@ -110,25 +111,28 @@ fn check_index(index_path: &str) -> Result<(), ()> {
         exit(1);
     })?;
 
-    println!("{info}: Reading file {file}", info = "INFO".bright_cyan(), file = index_path.bright_blue());
+    println!("{info}: Reading file {file}", info = "INFO".cyan(), file = index_path.bright_blue());
     let model: InMemoryModel = serde_json::from_reader(BufReader::new(index_file)).map_err(|err|  {
         eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_path.bright_blue(), err = err.to_string().red());
         exit(1);
     })?;
-    println!("{info}: Index file has {entries} entries", info = "INFO".bright_cyan(), entries = model.tf_index.len());
+    println!("{info}: Index file has {entries} entries", info = "INFO".cyan(), entries = model.tf_index.len());
     Ok(())  
 }
 
-const DEFAULT_INDEX_FILE_PATH: &str = "index.json";
+const DEFAULT_INDEX_JSON_PATH: &str = "index.json";
+const DEFAULT_INDEX_SQLITE_DB_PATH: &str = "index.db";
+
 
 fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     let index_file = fs::File::open(&index_path).map_err(|err| {
         eprintln!("{}: Could not open file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
-    })?;
+    }).unwrap();
 
     let model: InMemoryModel = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
         eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
-    })?;
+    }).unwrap();
+
     return Ok(model);
 }
 
@@ -143,12 +147,11 @@ fn usage(program: &String) {
 
 fn entry() -> Result<(), ()> {
     let mut args = env::args();
-    let program = args.next().expect("Path to program must be provided.");
+    let program = args.next().expect("path to program is provided");
 
-    let mut use_sqlite_mode = false;
     let mut subcommand = None;
+    let mut use_sqlite_mode = false;
 
-    // Look for --sqlite flag
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--sqlite" => use_sqlite_mode = true,
@@ -159,28 +162,29 @@ fn entry() -> Result<(), ()> {
         }
     }
 
-    let subcommand = args.next().unwrap_or_else(|| {
+    let subcommand = subcommand.ok_or_else(|| {
         usage(&program);
-        eprintln!("{}: no subcommand is provided.", "ERROR".bold().red());
-        exit(0);
-    });
-
+        eprintln!("ERROR: no subcommand is provided");
+    })?;
 
     match subcommand.as_str() {
         "index" => {
-            let dir_path = args.next().unwrap_or_else(|| {
+            let dir_path = args.next().ok_or_else(|| {
+                usage(&program);
                 eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-                exit(1);
-            });
+            })?;
 
             if use_sqlite_mode {
                 let index_path = "index.db";
 
                 // Remove previous index.db to update 
-                if let Err(err) = fs::remove_file(index_path) {
-                    eprintln!("{}: Could not delete file {path} as \"{err:?}\"", "ERROR".bold().red(), path = dir_path.bold().bright_blue(), err = err.to_string().red());
-                    return Err(());
+                if Path::exists(Path::new(index_path)) {
+                    if let Err(err) = fs::remove_file(index_path) {
+                        eprintln!("{}: Could not delete file {path} as \"{err}\"", "ERROR".bold().red(), path = index_path.bold().bright_blue(), err = err.to_string().red());
+                        return Err(());
+                    }
                 }
+
                 let mut model = SqliteModel::open(Path::new(index_path)).unwrap();
                 model.begin()?;
                 append_folder_to_model(Path::new(&dir_path), &mut model)?;
@@ -195,15 +199,15 @@ fn entry() -> Result<(), ()> {
         }
 
         "search" => {
-            let index_path = args.next().unwrap_or_else(|| {
+            let index_path = args.next().ok_or_else(|| {
+                usage(&program);
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-                exit(1);
-            });
+            })?;
 
-            let prompt = args.next().unwrap_or_else(|| {
+            let prompt = args.next().ok_or_else(|| {
+                usage(&program);
                 eprintln!("{}: Prompt must be provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-                exit(1);
-            }).chars().collect::<Vec<char>>();
+            })?.chars().collect::<Vec<char>>();
 
 
             if use_sqlite_mode {
@@ -222,35 +226,43 @@ fn entry() -> Result<(), ()> {
         }
 
         "check" => {
-            // TODO: Make it compatible with Sqlite db
-            let index_path = args.next().unwrap_or(DEFAULT_INDEX_FILE_PATH.to_string());
-            check_index(&index_path).unwrap();
+            if use_sqlite_mode {
+                let index_path = args.next().unwrap_or(DEFAULT_INDEX_SQLITE_DB_PATH.to_string());
+                let model = SqliteModel::open(Path::new(&index_path))?;
+                println!("{info}: Database has {count} entries.", info = "INFO".cyan(), count = model.check().unwrap());
+            } else {
+                let index_path = args.next().unwrap_or(DEFAULT_INDEX_JSON_PATH.to_string());
+                check_index(&index_path).unwrap();
+            }
         }
 
         "serve" => {
-            let index_path = args.next().unwrap_or_else(|| {
+            let index_path = args.next().ok_or_else(|| {
+                usage(&program);
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-                exit(1);
-            });
-
+            })?;
+            
             // Default address 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             
             if use_sqlite_mode {
                 let model = SqliteModel::open(Path::new(&index_path))?;
                 return server::start(&address, &model);
+                
             } else {
-                let model: InMemoryModel = fetch_model(&index_path).unwrap();
+                let model: InMemoryModel = fetch_model(&index_path).unwrap_or_else(|()| {
+                    eprintln!("{}: Failed to fetch model for {}.", "ERROR".bold().red(), index_path.bright_blue());
+                    exit(1);
+                });
                 return server::start(&address, &model);
             }
-
         }   
 
         _ => {
 
             usage(&program);
             eprintln!("{}: Unknown subcommand {}", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            exit(1);
+            return Err(());
         }
     }
     Ok(())

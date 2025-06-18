@@ -70,7 +70,7 @@ This command allows you to quickly check how many documents are present in a sav
 **Syntax:**
 
 ```bash
-DocSense check [input_index_file.json]
+./target/release/DocSense check [input_index_file.json]
 ```
 
   * `[input_index_file.json]` (Optional): The path to the index file to check. Defaults to `index.json`.
@@ -88,7 +88,7 @@ This command starts an HTTP server that allows you to submit search queries and 
 **Syntax:**
 
 ```bash
-DocSense serve <input_index_file.json> [address]
+./target/release/DocSense serve <input_index_file.json> [address]
 ```
 
   * `<input_index_file.json>`: The path to the index file you want to use for searching.

@@ -55,7 +55,11 @@ pub fn serve_api_search(mut request: Request, model: &impl Model) -> io::Result<
 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
-    let results = model.search_query(&body).unwrap();
+    // Main -> Get results from model 
+    let results = match model.search_query(&body) {
+        Ok(results) => results, 
+        Err(()) => return serve_500(request)
+    };
     
     // Display document ranks
     for (path, rank) in results.iter().take(10) {
