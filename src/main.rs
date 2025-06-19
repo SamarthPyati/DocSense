@@ -1,10 +1,10 @@
 use std:: {
-    env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter}, path::{Path}, process::{exit, ExitCode}, str::{self}
+    env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}
 };
 
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
-use colored::{ColoredString, Colorize};
+use colored::{Colorize};
 
 mod lexer;
 mod server;
@@ -35,6 +35,36 @@ fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
     Ok(content)
 }
 
+fn parse_txt_file(file_path: &Path) -> Result<String, ()> {
+    let mut content = String::new();
+    let mut file = File::open(file_path).map_err(|err| {
+        eprintln!("{}: Could not open file {path} as {err}", "ERROR".bold().red(), path = file_path.to_string_lossy().bright_blue(), err = err.to_string().red());
+    })?;
+
+    let _ = file.read_to_string(&mut content);
+    Ok(content)
+}
+
+fn parse_file_by_ext(file_path: &Path) -> Result<String, ()> {
+    let ext = file_path.extension().ok_or_else(|| {
+        eprintln!("{}: Could not get extension of {path}", "ERROR".bold().red(), path = file_path.to_string_lossy().bright_blue());   
+    })?.to_str();
+
+    match ext.unwrap() {
+        "xml" | "xhtml" => {
+            return parse_xml_file(file_path);
+        }
+
+        "txt" | "md" => {
+            return parse_txt_file(file_path); 
+        }
+
+        _ => {
+            eprintln!("{}: Extension {ext} is unsupported", "ERROR".bold().red(), ext = ext.unwrap());   
+            Err(())
+        }
+    }
+}
 
 /* Save the model to a path as json file */
 fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
@@ -67,10 +97,11 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
 
         let file_path = file.path();
         let file_path_str = file_path.to_str().unwrap();
+        let file_ext = file_path.extension();
 
         // Skip unsupported files
-        if let Some(ext) = file_path.extension() {
-            const ALLOWED_EXTS: [&str; 2] = ["xml", "xhtml"];
+        if let Some(ext) = file_ext {
+            const ALLOWED_EXTS: [&str; 4] = ["xml", "xhtml", "txt", "md"];
             if !ALLOWED_EXTS.contains(&ext.to_str().unwrap()) {
                 println!("{}: Skipping non-XML file {}", "INFO".cyan(), file_path_str.bright_yellow());
                 continue 'step;
@@ -90,14 +121,14 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
 
         println!("Indexing {} ...", file_path_str.bright_cyan());
 
-        let content = match parse_xml_file(&file_path) {
+        let content = match parse_file_by_ext(&file_path) {
             Ok(content) => content.chars().collect::<Vec<_>>(),
             Err(err) => {
                 eprintln!("{error}: Failed to read xml file {fp}: {msg:?}", error = "ERROR".bold().red(), fp = file_path.to_str().unwrap().bright_blue(), msg = err);
                 continue 'step;
             }
         };
-
+        
         // Core Operation
         model.add_document(file_path, &content)?;
     }
