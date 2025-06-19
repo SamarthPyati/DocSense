@@ -147,7 +147,7 @@ fn check_index(index_path: &str) -> Result<(), ()> {
         eprintln!("{}: Serde could not read file {file} as \"{err}\"", "ERROR".bold().red(), file = index_path.bright_blue(), err = err.to_string().red());
         exit(1);
     })?;
-    println!("{info}: Index file has {entries} entries", info = "INFO".cyan(), entries = model.tf_index.len());
+    println!("{info}: Index file has {entries} entries", info = "INFO".cyan(), entries = model.docs.len());
     Ok(())  
 }
 

@@ -189,17 +189,39 @@ impl Model for SqliteModel {
    Map of term with its frequency of occurence single document. */
 pub type FreqTable = HashMap::<String, usize>;  
 
-/* Map of a document with a pair containing (frequency table, total terms in that table (i.e sum of values)). */
-pub type FreqTableIndex = HashMap::<PathBuf, (usize, FreqTable)>;
+/* PREVIOUS: Map of a document with a pair containing (frequency table, total terms in that table (i.e sum of values)). */
+// pub type FreqTableIndex = HashMap::<PathBuf, (usize, FreqTable)>;
 
 /* Answers how frequently a term occurs in all documents. 
    Map of term with frequency of occurence in all corpus of documents.*/
 pub type GlobalTermFreq = HashMap::<String, usize>;
 
+#[derive(Default, Serialize, Deserialize)]
+pub struct Doc {
+    count: usize, 
+    ft: FreqTable
+}
+
+type Docs = HashMap::<PathBuf, Doc>;
+
 #[derive(Default, Deserialize, Serialize)]
 pub struct InMemoryModel {
     pub gtf: GlobalTermFreq, 
-    pub tf_index: FreqTableIndex
+    pub docs: Docs
+}
+
+fn compute_tf(term: &str, doc: &Doc) -> f32 {
+    let n = doc.ft.get(term).cloned().unwrap_or(0) as f32;   
+    let d = doc.count as f32;
+    n / d
+}
+
+fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
+    let n = model.docs.len() as f32;
+    // NOTE: Can lead to division by 0 if term is not in Document Corpus
+    // Set Denominator to 1 if turns to 0
+    let d  = model.gtf.get(term).cloned().unwrap_or(1) as f32;
+    f32::log10(n / d)
 }
 
 impl Model for InMemoryModel {
@@ -207,13 +229,13 @@ impl Model for InMemoryModel {
         let mut results = Vec::new();
         // Cache all the tokens and don't retokenize on each query 
         let tokens = Lexer::new(&query).collect::<Vec<_>>();
-        for (doc, (count, ft)) in &self.tf_index {
+        for (path, doc) in &self.docs {
             let mut rank = 0f32;   
             for token in &tokens {
                 // Rank is value of tf-idf => tf * idf
-                rank += compute_tf(&token, &ft, *count) * compute_idf(&token, &self);
+                rank += compute_tf(&token, &doc) * compute_idf(&token, &self);
             }
-            results.push((doc.clone(), rank));
+            results.push((path.to_owned(), rank));
         }
 
         // Rank the files in desc order
@@ -237,21 +259,7 @@ impl Model for InMemoryModel {
         for term in ft.keys() {
             self.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
         }
-        self.tf_index.insert(path, (term_count, ft));
+        self.docs.insert(path, Doc { count: term_count, ft: ft });
         Ok(())
     }
-}
-
-pub fn compute_tf(term: &str, freq_table: &FreqTable, term_count: usize) -> f32 {
-    let n = *freq_table.get(term).unwrap_or(&0) as f32;
-    let d = term_count.max(1) as f32;   
-    n / d
-}
-
-pub fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
-    let n = model.tf_index.len() as f32;
-    // NOTE: Can lead to division by 0 if term is not in Document Corpus
-    // Set Denominator to 1 if turns to 0
-    let d  = *model.gtf.get(term).unwrap_or(&1) as f32;
-    f32::log10(n / d)
 }
