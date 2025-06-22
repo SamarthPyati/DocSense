@@ -19,6 +19,7 @@ fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
     })?;
     let er = EventReader::new(BufReader::new(file));
     let mut content = String::new();
+
     for event in er.into_iter() {
         let event = event.map_err(|err| {
             let TextPosition {row, column} = err.position();
@@ -166,7 +167,7 @@ fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
 
     return Ok(model);
 }
-
+    
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
@@ -195,7 +196,7 @@ fn entry() -> Result<(), ()> {
 
     let subcommand = subcommand.ok_or_else(|| {
         usage(&program);
-        eprintln!("ERROR: no subcommand is provided");
+        eprintln!("{}: no subcommand is provided", "ERROR".red().bold());
     })?;
 
     match subcommand.as_str() {

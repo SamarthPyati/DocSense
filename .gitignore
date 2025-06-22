@@ -1,6 +1,6 @@
 target/ 
 docs.gl/
 
-index.json
-index.db
-index-big.json
+index*
+
+.[dD]S_Store

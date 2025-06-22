@@ -1,3 +1,5 @@
+use rust_stemmers::{Algorithm, Stemmer};
+
 #[derive(Debug)]
 pub struct Lexer<'a> {
     // Lifetimes implemented as content is not owned
@@ -38,6 +40,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_token(&mut self) -> Option<String> {
+        let stemmer = Stemmer::create(Algorithm::English);
         self.trim_left();
 
         if self.content.len() == 0 {
@@ -53,7 +56,10 @@ impl<'a> Lexer<'a> {
 
         if self.content[0].is_alphabetic() {
             let result = self.chop_while(|x| x.is_alphanumeric());
-            return Some(result.iter().map(|x| x.to_ascii_uppercase()).collect());
+            let token = result.iter().collect::<String>();
+            let stemmed_token = stemmer.stem(&token).into_owned().to_uppercase();
+            println!("Before: {}, After: {}", token, stemmed_token);
+            return Some(stemmed_token);
         }
         
         // // Ignore single-character unwanted punctuation
