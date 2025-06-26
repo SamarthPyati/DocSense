@@ -58,7 +58,6 @@ impl<'a> Lexer<'a> {
             let result = self.chop_while(|x| x.is_alphanumeric());
             let token = result.iter().collect::<String>();
             let stemmed_token = stemmer.stem(&token).into_owned().to_uppercase();
-            println!("Before: {}, After: {}", token, stemmed_token);
             return Some(stemmed_token);
         }
         

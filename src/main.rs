@@ -120,7 +120,7 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
             continue 'step;
         }   
 
-        println!("Indexing {} ...", file_path_str.bright_cyan());
+        println!("{}: Indexing {} ...", "INFO".cyan(), file_path_str.bright_cyan());
 
         let content = match parse_file_by_ext(&file_path) {
             Ok(content) => content.chars().collect::<Vec<_>>(),
