@@ -1,6 +1,7 @@
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use std::{
-    self, fs::File, io::{self, ErrorKind}, path::{Path}, process::exit, str
+    self, fs::File, io::{self, ErrorKind}, path::{Path}, process::exit, str,
+    sync::{Arc, Mutex}
 }; 
 
 use colored::Colorize;
@@ -37,7 +38,7 @@ pub fn serve_static_file(request: Request, file_path: &str) -> io::Result<()> {
 }
 
 
-pub fn serve_api_search(mut request: Request, model: &impl Model) -> io::Result<()>{
+pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()>{
     let mut buf = Vec::new();
     // Read the entire body of request 
     if let Err(err) = request.as_reader().read_to_end(&mut buf) {
@@ -55,7 +56,7 @@ pub fn serve_api_search(mut request: Request, model: &impl Model) -> io::Result<
 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
-    // Main -> Get results from model 
+    let model = model.lock().unwrap();
     let results = match model.search_query(&body) {
         Ok(results) => results, 
         Err(()) => return serve_500(request)
@@ -83,7 +84,7 @@ pub fn serve_api_search(mut request: Request, model: &impl Model) -> io::Result<
     return request.respond(response);
 }
 
-pub fn serve_request(request: Request, model: &impl Model) -> io::Result<()> {
+pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
@@ -113,7 +114,7 @@ pub fn serve_request(request: Request, model: &impl Model) -> io::Result<()> {
 }
 
 
-pub fn start(address: &str, model: &impl Model) -> Result<(), ()> {
+pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>) -> Result<(), ()> {
     let address_str = "http://".to_string() + &address + "/"; 
     let server = Server::http(address).map_err(|err| {
         eprintln!("{}: Could not create initiate server at {address} as \"{err}\"", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
@@ -123,7 +124,7 @@ pub fn start(address: &str, model: &impl Model) -> Result<(), ()> {
     println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
     for request in server.incoming_requests() {
-        serve_request(request, model).map_err(|err| {
+        serve_request(request, Arc::clone(&model)).map_err(|err| {
             eprintln!("{}: Failed to serve the request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
         }).ok(); // <- Don't stop here continue serving requests
     }

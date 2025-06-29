@@ -1,5 +1,6 @@
 use std:: {
-    env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}
+    env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}, 
+    sync::{Arc, Mutex}, thread
 };
 
 use xml::{self, reader::XmlEvent, EventReader};
@@ -10,7 +11,7 @@ mod lexer;
 mod server;
 mod model;
 
-use crate::model::{InMemoryModel, Model, SqliteModel};
+use crate::model::*;
 
 /* Parse all the text (Character Events) from the XML File */
 fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -36,6 +37,7 @@ fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
     Ok(content)
 }
 
+/* Parse all the text from the TXT File */
 fn parse_txt_file(file_path: &Path) -> Result<String, ()> {
     let mut content = String::new();
     let mut file = File::open(file_path).map_err(|err| {
@@ -81,30 +83,37 @@ fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()>
     Ok(())
 }
 
-/* Indexes a folder as a json file and adds to model */
-fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), ()> {
+/* Indexes a folder as a json file and adds to model, Processed is the number of file indexed */
+fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, processed: &mut usize) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
-        eprintln!("{err}: Failed to read directory {dir_path} as \"{msg}\"", err = "ERROR".bold().red(), 
+        eprintln!("{}: Failed to read directory {dir_path} as \"{err}\"", "ERROR".bold().red(), 
                                                                             dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
-                                                                            msg = err.to_string().red());
+                                                                            err = err.to_string().red());
     })?;
 
     'step: for file in dir {
         let file = file.map_err(|err| {
-            eprintln!("{err}: Failed to read next file in directory {dir_path} as {msg}", err = "ERROR".bold().red(), 
+            eprintln!("{}: Failed to read next file in directory {dir_path} as {err}", "ERROR".bold().red(), 
                                                                                         dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
-                                                                                        msg = err.to_string().red());
+                                                                                        err = err.to_string().red());
         })?;
 
         let file_path = file.path();
         let file_path_str = file_path.to_str().unwrap();
+        
+        let last_modified = file.metadata().map_err(|err| {
+            eprintln!("{}: Failed to get metadata of file {path} as {err}", "ERROR".bold().red(), path = file_path_str.bright_blue(), err = err.to_string().red());
+        })?.modified().map_err(|err| {
+            eprintln!("{}: Failed to last modified time of file {path} as {err}", "ERROR".bold().red(), path = file_path_str.bright_blue(), err = err.to_string().red());
+        }).unwrap();
+        
         let file_ext = file_path.extension();
 
         // Skip unsupported files
         if let Some(ext) = file_ext {
             const ALLOWED_EXTS: [&str; 4] = ["xml", "xhtml", "txt", "md"];
             if !ALLOWED_EXTS.contains(&ext.to_str().unwrap()) {
-                println!("{}: Skipping non-XML file {}", "INFO".cyan(), file_path_str.bright_yellow());
+                println!("{}: Skipping unsupported file {}", "INFO".cyan(), file_path_str.bright_yellow());
                 continue 'step;
             }
         }
@@ -116,22 +125,33 @@ fn append_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), 
 
         // Recursively index all the folders
         if file_type.is_dir() {
-            append_folder_to_model(&file_path, model)?;
+            // Skip the .git folder 
+            if file_path.file_name().unwrap() == ".git" {
+                continue 'step; 
+            }
+
+            append_folder_to_model(&file_path, Arc::clone(&model), processed)?;
             continue 'step;
         }   
 
-        println!("{}: Indexing {} ...", "INFO".cyan(), file_path_str.bright_cyan());
+        let mut model = model.lock().unwrap();
+        if model.requires_reindexing(&file_path, last_modified)? {
+            println!("{}: Indexing {} ...", "INFO".cyan(), file_path_str.bright_cyan());
+    
+            let content = match parse_file_by_ext(&file_path) {
+                Ok(content) => content.chars().collect::<Vec<_>>(),
+                Err(_) => {
+                    eprintln!("{}: Failed to read xml file {path}", "ERROR".bold().red(), path = file_path.to_str().unwrap().bright_blue());
+                    continue 'step;
+                }
+            };
 
-        let content = match parse_file_by_ext(&file_path) {
-            Ok(content) => content.chars().collect::<Vec<_>>(),
-            Err(err) => {
-                eprintln!("{error}: Failed to read xml file {fp}: {msg:?}", error = "ERROR".bold().red(), fp = file_path.to_str().unwrap().bright_blue(), msg = err);
-                continue 'step;
-            }
-        };
-        
-        // Core Operation
-        model.add_document(file_path, &content)?;
+            model.add_document(file_path, &content, last_modified)?;
+            *processed += 1;
+        } else {
+            println!("{}: Ignoring {} as already indexed ...", "INFO".cyan(), file_path_str.bright_cyan());            
+        }
+
     }
     Ok(())
 }
@@ -155,13 +175,13 @@ fn check_index(index_path: &str) -> Result<(), ()> {
 const DEFAULT_INDEX_JSON_PATH: &str = "index.json";
 const DEFAULT_INDEX_SQLITE_DB_PATH: &str = "index.db";
 
-
+/* Fetch the InMemory model from an index file */
 fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     let index_file = fs::File::open(&index_path).map_err(|err| {
         eprintln!("{}: Could not open file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
     }).unwrap();
 
-    let model: InMemoryModel = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
+    let model = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
         eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
     }).unwrap();
 
@@ -200,6 +220,27 @@ fn entry() -> Result<(), ()> {
     })?;
 
     match subcommand.as_str() {
+        /* 
+        "reindex" => {
+            assert!(!use_sqlite_mode, "The sqlite model is deprecated");
+            let dir_path = args.next().ok_or_else(|| {
+                usage(&program);
+                eprintln!("ERROR: no directory is provided for {subcommand} subcommand");
+            })?;
+
+            let index_path = "index.json";
+            let index_file = File::open(&index_path).map_err(|err| {
+                eprintln!("ERROR: could not open index file {index_path}: {err}");
+            })?;
+            let mut model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
+                eprintln!("ERROR: could not parse index file {index_path}: {err}");
+            })?;
+
+            append_folder_to_model(Path::new(&dir_path), &mut model)?;
+            save_model_as_json(&model, index_path)?;
+            return Ok(());
+        }
+
         "index" => {
             let dir_path = args.next().ok_or_else(|| {
                 usage(&program);
@@ -224,13 +265,15 @@ fn entry() -> Result<(), ()> {
 
             } else {
                 let index_path = "index.json";
-                let mut model = InMemoryModel::default();
+                let mut model = Default::default();
                 append_folder_to_model(Path::new(&dir_path), &mut model)?;
                 save_model_as_json(&model, index_path)?;
             }
         }
+        */
 
         "search" => {
+            assert!(!use_sqlite_mode, "Sqlite mode is DEPRACATED.");
             let index_path = args.next().ok_or_else(|| {
                 usage(&program);
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
@@ -269,25 +312,44 @@ fn entry() -> Result<(), ()> {
         }
 
         "serve" => {
-            let index_path = args.next().ok_or_else(|| {
+            assert!(!use_sqlite_mode, "SQLITE mode is DEPRACATED.");
+            let dir_path = args.next().ok_or_else(|| {
                 usage(&program);
-                eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
+                eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
             })?;
-            
+
             // Default address 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             
-            if use_sqlite_mode {
-                let model = SqliteModel::open(Path::new(&index_path))?;
-                return server::start(&address, &model);
-                
-            } else {
-                let model: InMemoryModel = fetch_model(&index_path).unwrap_or_else(|()| {
-                    eprintln!("{}: Failed to fetch model for {}.", "ERROR".bold().red(), index_path.bright_blue());
+            // TODO: Figure out index_path based on dir_path
+            let index_path = DEFAULT_INDEX_JSON_PATH; 
+            let exists = Path::new(index_path).exists();
+            
+            let model: Arc<Mutex<InMemoryModel>>;
+            if exists {
+                // Fetch already existing model 
+                model = Arc::new(Mutex::new(fetch_model(&DEFAULT_INDEX_JSON_PATH).unwrap_or_else(|()| {
+                    eprintln!("{}: Failed to fetch model for {}.", "ERROR".bold().red(), DEFAULT_INDEX_JSON_PATH.bright_blue());
                     exit(1);
-                });
-                return server::start(&address, &model);
+                })));
+            } else {
+                model = Arc::new(Mutex::new(Default::default()));
             }
+            
+            {
+                let model = Arc::clone(&model); 
+                thread::spawn(move || {
+                    let mut processed: usize = 0 as usize;
+                    append_folder_to_model(Path::new(&dir_path), Arc::clone(&model), &mut processed).unwrap();
+                    
+                    // Save the model only when some files are processed
+                    if processed > 0 {
+                        let model= model.lock().unwrap();
+                        save_model_as_json(&model, index_path).unwrap();
+                    }
+                });
+            }
+            return server::start(&address, Arc::clone(&model));
         }   
 
         _ => {
