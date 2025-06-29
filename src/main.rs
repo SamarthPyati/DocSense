@@ -191,7 +191,6 @@ fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
 fn usage(program: &String) {
     eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
     eprintln!("Subcommands:");
-    eprintln!("    index  <folder> [save-path]        Index the <folder> containing XML/XHTML files and save the index to [save-path] (Default: index.json)");
     eprintln!("    search <index-file> <prompt>       Search query within a index file. (Default: Shows top 20 search results)");
     eprintln!("    check  [index-file]                Quickly check how many documents are present in a saved index file (Default: index.json)");
     eprintln!("    serve  <index-file> [address]      Starts an HTTP server with Web Interface based on a pre-built index (Default: localhost:6969)");
