@@ -220,58 +220,6 @@ fn entry() -> Result<(), ()> {
     })?;
 
     match subcommand.as_str() {
-        /* 
-        "reindex" => {
-            assert!(!use_sqlite_mode, "The sqlite model is deprecated");
-            let dir_path = args.next().ok_or_else(|| {
-                usage(&program);
-                eprintln!("ERROR: no directory is provided for {subcommand} subcommand");
-            })?;
-
-            let index_path = "index.json";
-            let index_file = File::open(&index_path).map_err(|err| {
-                eprintln!("ERROR: could not open index file {index_path}: {err}");
-            })?;
-            let mut model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
-                eprintln!("ERROR: could not parse index file {index_path}: {err}");
-            })?;
-
-            append_folder_to_model(Path::new(&dir_path), &mut model)?;
-            save_model_as_json(&model, index_path)?;
-            return Ok(());
-        }
-
-        "index" => {
-            let dir_path = args.next().ok_or_else(|| {
-                usage(&program);
-                eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            })?;
-
-            if use_sqlite_mode {
-                let index_path = "index.db";
-
-                // Remove previous index.db to update 
-                if Path::exists(Path::new(index_path)) {
-                    if let Err(err) = fs::remove_file(index_path) {
-                        eprintln!("{}: Could not delete file {path} as \"{err}\"", "ERROR".bold().red(), path = index_path.bold().bright_blue(), err = err.to_string().red());
-                        return Err(());
-                    }
-                }
-
-                let mut model = SqliteModel::open(Path::new(index_path)).unwrap();
-                model.begin()?;
-                append_folder_to_model(Path::new(&dir_path), &mut model)?;
-                model.commit()?;
-
-            } else {
-                let index_path = "index.json";
-                let mut model = Default::default();
-                append_folder_to_model(Path::new(&dir_path), &mut model)?;
-                save_model_as_json(&model, index_path)?;
-            }
-        }
-        */
-
         "search" => {
             assert!(!use_sqlite_mode, "Sqlite mode is DEPRACATED.");
             let index_path = args.next().ok_or_else(|| {
@@ -347,6 +295,7 @@ fn entry() -> Result<(), ()> {
                         let model= model.lock().unwrap();
                         save_model_as_json(&model, index_path).unwrap();
                     }
+                    println!("{}: Finished indexing ...", "INFO".cyan());
                 });
             }
             return server::start(&address, Arc::clone(&model));
