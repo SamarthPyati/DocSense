@@ -1,6 +1,8 @@
 target/ 
 docs.gl/
 
+papers/
+
 index*
 
 .[dD]S_Store

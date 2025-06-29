@@ -1,5 +1,5 @@
 use std::{
-    path::{self, Path, PathBuf}, time::SystemTime
+    path::{Path, PathBuf}, time::SystemTime
 };
 
 use std::collections::HashMap;

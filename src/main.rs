@@ -12,6 +12,7 @@ mod server;
 mod model;
 
 use crate::model::*;
+use poppler::PopplerDocument;
 
 /* Parse all the text (Character Events) from the XML File */
 fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -48,6 +49,26 @@ fn parse_txt_file(file_path: &Path) -> Result<String, ()> {
     Ok(content)
 }
 
+fn parse_pdf_files(file_path: &Path) -> Result<String, ()> {
+    let mut content = String::new();
+            
+    let pdf_file = PopplerDocument::new_from_file(file_path, None).map_err(|err| {
+        eprintln!("{}: Failed to open pdf file as {}", "ERROR".red().bold(), err.to_string().red());
+    })?;
+
+    if !pdf_file.is_empty() {
+        for (n, page) in pdf_file.pages().enumerate() { 
+            if let Some(text) = page.get_text() {
+                content.push_str(text);
+            } else {
+                eprintln!("{}: Could not get text of page {n} of {file_path}.", "ERROR".red().bold(), file_path = file_path.to_string_lossy().bright_blue())
+            }
+        }
+    }
+    println!("{}", content.split_at(1000).0);
+    Ok(content)
+}
+
 fn parse_file_by_ext(file_path: &Path) -> Result<String, ()> {
     let ext = file_path.extension().ok_or_else(|| {
         eprintln!("{}: Could not get extension of {path}", "ERROR".bold().red(), path = file_path.to_string_lossy().bright_blue());   
@@ -60,6 +81,10 @@ fn parse_file_by_ext(file_path: &Path) -> Result<String, ()> {
 
         "txt" | "md" => {
             return parse_txt_file(file_path); 
+        }
+
+        "pdf" => {
+            return parse_pdf_files(file_path);
         }
 
         _ => {
@@ -111,7 +136,7 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
         // Skip unsupported files
         if let Some(ext) = file_ext {
-            const ALLOWED_EXTS: [&str; 4] = ["xml", "xhtml", "txt", "md"];
+            const ALLOWED_EXTS: [&str; 5] = ["xml", "xhtml", "txt", "md", "pdf"];
             if !ALLOWED_EXTS.contains(&ext.to_str().unwrap()) {
                 println!("{}: Skipping unsupported file {}", "INFO".cyan(), file_path_str.bright_yellow());
                 continue 'step;

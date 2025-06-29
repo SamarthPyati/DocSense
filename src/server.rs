@@ -1,7 +1,6 @@
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use std::{
-    self, fs::File, io::{self, ErrorKind}, path::{Path}, process::exit, str,
-    sync::{Arc, Mutex}
+    self, cmp::Ordering, fs::File, io::{self, ErrorKind}, path::Path, process::exit, str, sync::{Arc, Mutex}
 }; 
 
 use colored::Colorize;
@@ -26,7 +25,7 @@ pub fn serve_static_file(request: Request, file_path: &str) -> io::Result<()> {
     let html_file = match File::open(Path::new(file_path)) {
         Ok(file) => file, 
         Err(err) => {
-            eprintln!("{}: Could not open html file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = file_path.bright_blue(), err = err.to_string().red());
+            eprintln!("{}: Could not open html file {file_path} as {err}", "ERROR".bold().red(), file_path = file_path.bright_blue(), err = err.to_string().red());
             if err.kind() == ErrorKind::NotFound {
                 return serve_404(request);
             }
@@ -42,14 +41,14 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) 
     let mut buf = Vec::new();
     // Read the entire body of request 
     if let Err(err) = request.as_reader().read_to_end(&mut buf) {
-        eprintln!("{}: Could not read body of request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+        eprintln!("{}: Could not read body of request as {err}", "ERROR".bold().red(), err = err.to_string().red());
         return serve_500(request);
     }
 
     let body = match str::from_utf8(&mut buf) {
         Ok(body) => body.chars().collect::<Vec<_>>(), 
         Err(err) => {
-            eprintln!("{}: Could not interpret body as UTF-8 string as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            eprintln!("{}: Could not interpret body as UTF-8 string as {err}", "ERROR".bold().red(), err = err.to_string().red());
             return serve_400(request, "Body must be a valid UTF-8 string");
         }
     };
@@ -62,16 +61,20 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) 
         Err(()) => return serve_500(request)
     };
     
-    // Display document ranks
+    let mut content= Vec::new();
+    // Display document ranks (if rank turns 0 while iterating, stop from there)
     for (path, rank) in results.iter().take(10) {
+        if rank.partial_cmp(&0f32) == Some(Ordering::Equal) {
+            break;
+        }
         println!("      {} => {}", path.display(), rank);
-    }
+        content.push((path, rank));
+    } 
 
-    let content= &results.iter().take(20).collect::<Vec<_>>();
-    let json = match serde_json::to_string(content) {
+    let json = match serde_json::to_string(&content) {
         Ok(json) => json, 
         Err(err) => {
-            eprintln!("{}: could not convert search results to JSON as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            eprintln!("{}: could not convert search results to JSON as {err}", "ERROR".bold().red(), err = err.to_string().red());
             return serve_500(request);
         }
     };
@@ -117,7 +120,7 @@ pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::
 pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>) -> Result<(), ()> {
     let address_str = "http://".to_string() + &address + "/"; 
     let server = Server::http(address).map_err(|err| {
-        eprintln!("{}: Could not create initiate server at {address} as \"{err}\"", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
+        eprintln!("{}: Could not create initiate server at {address} as {err}", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
         exit(1);
     }).unwrap();
 
@@ -125,7 +128,7 @@ pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>) -> Result<(), ()> 
 
     for request in server.incoming_requests() {
         serve_request(request, Arc::clone(&model)).map_err(|err| {
-            eprintln!("{}: Failed to serve the request as \"{err}\"", "ERROR".bold().red(), err = err.to_string().red());
+            eprintln!("{}: Failed to serve the request as {err}", "ERROR".bold().red(), err = err.to_string().red());
         }).ok(); // <- Don't stop here continue serving requests
     }
     eprintln!("{}: Server socket has shutdown", "ERROR".bold().red());
