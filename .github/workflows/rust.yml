@@ -42,3 +42,13 @@ jobs:
 
     - name: Run Tests
       run: cargo test --verbose
+
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev pkg-config
+    
+    # Set PKG_CONFIG_PATH if needed for poppler deps
+    - name: Set PKG_CONFIG_PATH
+      run: echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+      
+    - name: Build
+      run: cargo build --verbose
