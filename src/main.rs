@@ -232,18 +232,10 @@ fn entry() -> Result<(), ()> {
                 eprintln!("{}: Prompt must be provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
             })?.chars().collect::<Vec<char>>();
 
-
-            if use_sqlite_mode {
-                let model = SqliteModel::open(Path::new(&index_path))?;
-                for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
-                    println!("{path} - {rank}", path = path.display());
-                } 
-            } else {
-                let model = fetch_model(&index_path)?;
-                for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
-                    println!("{path} - {rank}", path = path.display());
-                } 
-            }
+            let model = fetch_model(&index_path)?;
+            for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
+                println!("{path} - {rank}", path = path.display());
+            } 
 
             return Ok(());
         }
@@ -320,3 +312,9 @@ fn main() -> io::Result<()> {
 
     return Ok(());
 }
+
+// TODO: Search result must consist of clickable links to open that file or file section
+// TODO: Parse pdf files
+// TODO: Synonym terms
+// TODO: Add levenstein distance or cosine similarity
+// TODO: Add better document ranker specifically "Okapi BM-25"
