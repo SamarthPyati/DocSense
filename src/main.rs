@@ -49,6 +49,7 @@ fn parse_txt_file(file_path: &Path) -> Result<String, ()> {
     Ok(content)
 }
 
+/* Parse all the text from the PDF File with Poppler */
 fn parse_pdf_files(file_path: &Path) -> Result<String, ()> {
     let mut content = String::new();
             
@@ -108,6 +109,8 @@ fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()>
     Ok(())
 }
 
+const ALLOWED_FILE_TYPE_EXTENSIONS: [&str; 5] = ["xml", "xhtml", "txt", "md", "pdf"];
+
 /* Indexes a folder as a json file and adds to model, Processed is the number of file indexed */
 fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, processed: &mut usize) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
@@ -136,11 +139,20 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
         // Skip unsupported files
         if let Some(ext) = file_ext {
-            const ALLOWED_EXTS: [&str; 5] = ["xml", "xhtml", "txt", "md", "pdf"];
-            if !ALLOWED_EXTS.contains(&ext.to_str().unwrap()) {
+            if !ALLOWED_FILE_TYPE_EXTENSIONS.contains(&ext.to_str().unwrap()) {
                 println!("{}: Skipping unsupported file {}", "INFO".cyan(), file_path_str.bright_yellow());
                 continue 'step;
             }
+        }
+
+        // Skip dot files or folders 
+        let dot_files = file_path
+                              .file_name()
+                              .and_then(|s| s.to_str())
+                              .map(|s| s.starts_with("."))
+                              .unwrap();
+        if dot_files {
+            continue 'step;
         }
 
         // If file is another directory recursively index it too 
@@ -150,11 +162,6 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
         // Recursively index all the folders
         if file_type.is_dir() {
-            // Skip the .git folder 
-            if file_path.file_name().unwrap() == ".git" {
-                continue 'step; 
-            }
-
             append_folder_to_model(&file_path, Arc::clone(&model), processed)?;
             continue 'step;
         }   
@@ -173,10 +180,7 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
             model.add_document(file_path, &content, last_modified)?;
             *processed += 1;
-        } else {
-            println!("{}: Ignoring {} as already indexed ...", "INFO".cyan(), file_path_str.bright_cyan());            
-        }
-
+        }  
     }
     Ok(())
 }
@@ -314,11 +318,11 @@ fn entry() -> Result<(), ()> {
                     println!("{}: Finished indexing ...", "INFO".cyan());
                 });
             }
+            // TODO: Print the information of server start at the end of logging
             return server::start(&address, Arc::clone(&model));
         }   
 
         _ => {
-
             usage(&program);
             eprintln!("{}: Unknown subcommand {}", "ERROR".bold().red(), subcommand.bold().bright_blue());
             return Err(());
