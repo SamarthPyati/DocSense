@@ -2,8 +2,6 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 #[derive(Debug)]
 pub struct Lexer<'a> {
-    // Lifetimes implemented as content is not owned
-    // as used it will be assigned or shifted
     content: &'a [char]
 }
 

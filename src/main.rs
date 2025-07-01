@@ -97,14 +97,14 @@ fn parse_file_by_ext(file_path: &Path) -> Result<String, ()> {
 
 /* Save the model to a path as json file */
 fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
-    println!("Saving folder index to {} ...", index_path);
+    println!("Saving {} ...", index_path.bright_blue());
     
     let index_file = File::create(index_path).map_err(|err| {
-        eprintln!("{err}: Failed to create file {path} as {msg}", err = "ERROR".bold().red(), path = index_path.bright_blue(), msg = err.to_string().red());
+        eprintln!("{}: Failed to create file {path} as {err}", "ERROR".bold().red(), path = index_path.bright_blue(), err = err.to_string().red());
     })?;
 
     serde_json::to_writer(BufWriter::new(index_file), &model).unwrap_or_else(|err| {
-        eprintln!("{err}: Failed to save file {path} as {msg}", err = "ERROR".bold().red(), path = index_path.bright_blue(), msg = err.to_string().red());
+        eprintln!("{}: Failed to save file {path} as {err}", "ERROR".bold().red(), path = index_path.bright_blue(), err = err.to_string().red());
     });
     Ok(())
 }
@@ -289,18 +289,19 @@ fn entry() -> Result<(), ()> {
             // Default address 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             
-            // TODO: Figure out index_path based on dir_path
-            let index_path = DEFAULT_INDEX_JSON_PATH; 
-            let exists = Path::new(index_path).exists();
-            
+            // TODO: Figure out a better way to append extension ".docsense.json"
+            let mut index_path = Path::new(&dir_path).to_path_buf(); 
+            index_path.push(".docsense.json");
+
             let model: Arc<Mutex<InMemoryModel>>;
-            if exists {
+            if index_path.exists() {
                 // Fetch already existing model 
-                model = Arc::new(Mutex::new(fetch_model(&DEFAULT_INDEX_JSON_PATH).unwrap_or_else(|()| {
-                    eprintln!("{}: Failed to fetch model for {}.", "ERROR".bold().red(), DEFAULT_INDEX_JSON_PATH.bright_blue());
+                model = Arc::new(Mutex::new(fetch_model(&index_path.to_str().unwrap()).unwrap_or_else(|()| {
+                    eprintln!("{}: Failed to fetch model for {}.", "ERROR".bold().red(), index_path.to_string_lossy().bright_blue());
                     exit(1);
                 })));
             } else {
+                // Create a new model if not present 
                 model = Arc::new(Mutex::new(Default::default()));
             }
             
@@ -313,7 +314,7 @@ fn entry() -> Result<(), ()> {
                     // Save the model only when some files are processed
                     if processed > 0 {
                         let model= model.lock().unwrap();
-                        save_model_as_json(&model, index_path).unwrap();
+                        save_model_as_json(&model, index_path.to_str().unwrap()).unwrap();
                     }
                     println!("{}: Finished indexing ...", "INFO".cyan());
                 });
@@ -332,17 +333,15 @@ fn entry() -> Result<(), ()> {
 }
 
 fn main() -> io::Result<()> {   
-    
+
     match entry() {
         Ok(()) => ExitCode::SUCCESS, 
         Err(_) => ExitCode::FAILURE 
     };
-
-    return Ok(());
+    Ok(())
 }
 
 // TODO: Search result must consist of clickable links to open that file or file section
-// TODO: Parse pdf files
 // TODO: Synonym terms
 // TODO: Add levenstein distance or cosine similarity
 // TODO: Add better document ranker specifically "Okapi BM-25"
