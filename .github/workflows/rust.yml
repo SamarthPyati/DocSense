@@ -35,8 +35,8 @@ jobs:
         override: true
     
     - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev pkg-config
-    
+      run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libglib2.0-dev pkg-config
+
     - name: Build (Debug)
       run: cargo build --verbose
 
