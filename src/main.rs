@@ -12,7 +12,7 @@ mod server;
 mod model;
 
 use crate::model::*;
-use poppler::PopplerDocument;
+use poppler::{Document};
 
 /* Parse all the text (Character Events) from the XML File */
 fn parse_xml_file(file_path: &Path) -> Result<String, ()> {
@@ -51,22 +51,32 @@ fn parse_txt_file(file_path: &Path) -> Result<String, ()> {
 
 /* Parse all the text from the PDF File with Poppler */
 fn parse_pdf_files(file_path: &Path) -> Result<String, ()> {
-    let mut content = String::new();
-            
-    let pdf_file = PopplerDocument::new_from_file(file_path, None).map_err(|err| {
-        eprintln!("{}: Failed to open pdf file as {}", "ERROR".red().bold(), err.to_string().red());
+    let mut file_content = Vec::new();
+
+    File::open(file_path)
+        .and_then(|mut file| file.read_to_end(&mut file_content))
+        .map_err(|err| {
+            eprintln!("{}: Failed to get contents of PDF file {path} as {err}", "ERROR".red().bold(), path = file_path.to_string_lossy().bright_blue(), err = err.to_string().red());
+        })?;
+
+
+    let pdf_file = Document::from_data(&file_content, None).map_err(|err| {
+        eprintln!("{}: Failed to make poppler document out of PDF file {path} as {err}", "ERROR".red().bold(), path = file_path.to_string_lossy().bright_blue(), err = err.to_string().red());
     })?;
 
-    if !pdf_file.is_empty() {
-        for (n, page) in pdf_file.pages().enumerate() { 
-            if let Some(text) = page.get_text() {
-                content.push_str(text);
+
+    let mut content = String::new();
+    if pdf_file.n_pages() > 0 {
+        for i in 0..pdf_file.n_pages() { 
+            if let Some(page) = pdf_file.page(i) {
+                if let Some(text) = page.text() {
+                    content.push_str(&text.as_str());
+                }
             } else {
-                eprintln!("{}: Could not get text of page {n} of {file_path}.", "ERROR".red().bold(), file_path = file_path.to_string_lossy().bright_blue())
+                eprintln!("{}: Could not get text of page {i} of {file_path}.", "ERROR".red().bold(), file_path = file_path.to_string_lossy().bright_blue())
             }
         }
     }
-    println!("{}", content.split_at(1000).0);
     Ok(content)
 }
 

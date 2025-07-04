@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 colored = "3.0.0"
-poppler = "0.6.0"
+poppler-rs = "0.24.1"
 rust-stemmers = "1.2.0"
 serde = { version = "1.0.219" , features = ["derive"] }
 serde_json = "1.0.140"

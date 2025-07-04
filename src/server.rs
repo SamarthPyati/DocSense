@@ -87,6 +87,36 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) 
     return request.respond(response);
 }
 
+pub fn serve_api_stats(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()> {
+    use serde::Serialize;
+    #[derive(Default, Serialize)]
+    struct Stats {
+        doc_count: usize, 
+        unique_term_count: usize, 
+    }
+
+    let model = model.lock().unwrap();
+    let stats = Stats {
+        doc_count: model.docs.len(), 
+        unique_term_count: model.gtf.len()
+    };
+
+    let json = match serde_json::to_string(&stats) {
+        Ok(json) => json, 
+        Err(err) => {
+            eprintln!("{}: could not convert search results to JSON as {err}", "ERROR".bold().red(), err = err.to_string().red());
+            return serve_500(request);
+        }
+    };
+
+    let content_header = Header::from_bytes("Content-Type", "application/json")
+                                                    .expect("Header entered is not a garbage value");
+    
+    let response = Response::from_string(json).with_header(content_header);
+
+    return request.respond(response);
+}
+
 pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
@@ -106,6 +136,10 @@ pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::
 
         (Method::Post, "/api/search") => {
             serve_api_search(request, model)?
+        }
+
+        (Method::Get, "/api/stats") => {
+            serve_api_stats(request, model)?
         }
 
         _ => {
