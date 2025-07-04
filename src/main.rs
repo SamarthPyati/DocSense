@@ -176,6 +176,14 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
             continue 'step;
         }   
 
+        // Get absolute file path 
+        let file_path = fs::canonicalize(&file_path).map_err(|err| {
+            eprintln!("{}: Could not canonicalize path {} as {}", "ERROR".red().bold(),
+            file_path.display().to_string().bright_blue(),
+            err.to_string().red());
+        })?;
+        
+        // Main 
         let mut model = model.lock().unwrap();
         if model.requires_reindexing(&file_path, last_modified)? {
             println!("{}: Indexing {} ...", "INFO".cyan(), file_path_str.bright_cyan());
@@ -299,7 +307,7 @@ fn entry() -> Result<(), ()> {
             // Default address 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
             
-            // TODO: Figure out a better way to append extension ".docsense.json"
+            // IDEATE: Is it fine to place the index file in the folder itself or place in a root dir?
             let mut index_path = Path::new(&dir_path).to_path_buf(); 
             index_path.push(".docsense.json");
 
@@ -351,7 +359,6 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-// TODO: Search result must consist of clickable links to open that file or file section
 // TODO: Synonym terms
 // TODO: Add levenstein distance or cosine similarity
 // TODO: Add better document ranker specifically "Okapi BM-25"

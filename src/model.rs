@@ -1,5 +1,5 @@
 use std::{
-    path::{Path, PathBuf}, time::SystemTime
+    fs, path::{Path, PathBuf}, time::SystemTime
 };
 
 use std::collections::HashMap;
@@ -282,6 +282,8 @@ impl Model for InMemoryModel {
         for term in ft.keys() {
             self.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
         }
+
+        // Update the Docs table
         self.docs.insert(file_path, Doc { count: term_count, ft: ft , last_modified: last_modified});
         Ok(())
     }

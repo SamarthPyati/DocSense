@@ -16,17 +16,20 @@ async function search(prompt) {
         body: prompt
     });
 
-    for ([path, rank] of await response.json()) {
-        if (response.json === null) {
-            let item = document.createElement("span");
-            item.appendChild(document.createTextNode("No such token found"));
-            item.appendChild(document.createElement("br"));    
-        }
-
+    const data = await response.json();
+    if (data.length === 0) {
         let item = document.createElement("span");
-        item.appendChild(document.createTextNode(path));
-        item.appendChild(document.createElement("br"));
+        item.textContent = "No results found.";
         results.appendChild(item);
+    } else {
+        for (let [path, rank] of data) {
+            let link = document.createElement("a");
+            link.href = path;
+            link.target = "_blank"; // open in new tab
+            link.textContent = path;
+            results.appendChild(link);
+            results.appendChild(document.createElement("br"));
+        }
     }
 }
 
