@@ -1,4 +1,4 @@
-name: Rust
+name: DocSense CI
 
 on:
   push:
@@ -16,7 +16,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # Caching deps before build 
     - name: Cache Cargo dependencies
       uses: actions/cache@v4
       with:
@@ -35,7 +34,21 @@ jobs:
         override: true
     
     - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libglib2.0-dev pkg-config
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpoppler-glib-dev pkg-config
+        PKG_PATH=$(dpkg -L libpoppler-glib-dev | grep 'poppler-glib.pc' || true)
+        echo "Found poppler-glib.pc at: $PKG_PATH"
+        if [ -z "$PKG_PATH" ]; then
+          echo "ERROR: poppler-glib.pc not found!" && exit 1
+        fi
+        export PKG_CONFIG_PATH=$(dirname $PKG_PATH)
+        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+    - name: Verify pkg-config
+      run: |
+        echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+        pkg-config --modversion poppler-glib
 
     - name: Build (Debug)
       run: cargo build --verbose

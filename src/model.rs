@@ -1,5 +1,5 @@
 use std::{
-    fs, path::{Path, PathBuf}, time::SystemTime
+    path::{Path, PathBuf}, time::SystemTime
 };
 
 use std::collections::HashMap;
@@ -294,7 +294,6 @@ impl Model for InMemoryModel {
         }
         return Ok(true);
     }
-
 }
 
 // TODO: Implement a efficient sqlite Model with parellel processing support

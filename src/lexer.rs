@@ -59,14 +59,6 @@ impl<'a> Lexer<'a> {
             return Some(stemmed_token);
         }
         
-        // // Ignore single-character unwanted punctuation
-        // let unwanted_symbols  = &[',', ';', '*', '/', '?', '{', '}', '(', ')', '.', '$', '_', '-'];
-        
-        // if unwanted_symbols.contains(&self.content[0]) {
-        //     self.chop(1);   // skip this token 
-        //     return self.next_token();     // recursively fetch next token 
-        // }
-
         let token = self.chop(1);
         return Some(token.iter().collect());
     }

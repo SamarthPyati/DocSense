@@ -64,7 +64,6 @@ fn parse_pdf_files(file_path: &Path) -> Result<String, ()> {
         eprintln!("{}: Failed to make poppler document out of PDF file {path} as {err}", "ERROR".red().bold(), path = file_path.to_string_lossy().bright_blue(), err = err.to_string().red());
     })?;
 
-
     let mut content = String::new();
     if pdf_file.n_pages() > 0 {
         for i in 0..pdf_file.n_pages() { 
