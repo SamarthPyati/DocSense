@@ -1,6 +1,11 @@
 use std:: {
-    env::{self}, fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}, 
-    sync::{Arc, Mutex}, thread
+    env::{self}, 
+    fs::{self, File}, 
+    io::{self, BufReader, BufWriter, Read}, 
+    path::Path, process::{exit, ExitCode}, 
+    str::{self}, 
+    sync::{Arc, Mutex}, 
+    thread
 };
 
 use xml::{self, reader::XmlEvent, EventReader};
@@ -219,7 +224,6 @@ fn check_index(index_path: &str) -> Result<(), ()> {
 }
 
 const DEFAULT_INDEX_JSON_PATH: &str = "index.json";
-const DEFAULT_INDEX_SQLITE_DB_PATH: &str = "index.db";
 
 /* Fetch the InMemory model from an index file */
 fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
@@ -245,13 +249,16 @@ fn usage(program: &String) {
 fn entry() -> Result<(), ()> {
     let mut args = env::args();
     let program = args.next().expect("path to program is provided");
+    let cloned_args: Vec<String> = env::args().skip(1).collect::<Vec<String>>();
 
     let mut subcommand = None;
-    let mut use_sqlite_mode = false;
 
-    while let Some(arg) = args.next() {
+    for arg in cloned_args {
         match arg.as_str() {
-            "--sqlite" => use_sqlite_mode = true,
+            "--sqlite" => {
+                eprintln!("{}: 'SQLITE' mode is depracated. Remove '--sqlite' flag.", "ERROR".red().bold());
+                exit(-1);
+            }
             _ => {
                 subcommand = Some(arg);
                 break
@@ -266,7 +273,6 @@ fn entry() -> Result<(), ()> {
 
     match subcommand.as_str() {
         "search" => {
-            assert!(!use_sqlite_mode, "Sqlite mode is DEPRACATED.");
             let index_path = args.next().ok_or_else(|| {
                 usage(&program);
                 eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
@@ -286,18 +292,11 @@ fn entry() -> Result<(), ()> {
         }
 
         "check" => {
-            if use_sqlite_mode {
-                let index_path = args.next().unwrap_or(DEFAULT_INDEX_SQLITE_DB_PATH.to_string());
-                let model = SqliteModel::open(Path::new(&index_path))?;
-                println!("{info}: Database has {count} entries.", info = "INFO".cyan(), count = model.check().unwrap());
-            } else {
-                let index_path = args.next().unwrap_or(DEFAULT_INDEX_JSON_PATH.to_string());
-                check_index(&index_path).unwrap();
-            }
+            let index_path = args.next().unwrap_or(DEFAULT_INDEX_JSON_PATH.to_string());
+            check_index(&index_path).unwrap();
         }
 
         "serve" => {
-            assert!(!use_sqlite_mode, "SQLITE mode is DEPRACATED.");
             let dir_path = args.next().ok_or_else(|| {
                 usage(&program);
                 eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
