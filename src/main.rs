@@ -250,24 +250,7 @@ fn usage(program: &String) {
 fn entry() -> Result<(), ()> {
     let mut args = env::args();
     let program = args.next().expect("path to program is provided");
-    let cloned_args: Vec<String> = env::args().skip(1).collect::<Vec<String>>();
-
-    let mut subcommand = None;
-
-    for arg in cloned_args {
-        match arg.as_str() {
-            "--sqlite" => {
-                eprintln!("{}: 'SQLITE' mode is depracated. Remove '--sqlite' flag.", "ERROR".red().bold());
-                exit(-1);
-            }
-            _ => {
-                subcommand = Some(arg);
-                break
-            }
-        }
-    }
-
-    let subcommand = subcommand.ok_or_else(|| {
+    let subcommand = args.next().ok_or_else(|| {
         usage(&program);
         eprintln!("{}: no subcommand is provided", "ERROR".red().bold());
     })?;
