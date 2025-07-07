@@ -63,7 +63,7 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
     let model = model.lock().unwrap();
-    let results = match model.search_query(&body) {
+    let results = match model.search_query(&body, &model) {
         Ok(results) => results, 
         Err(()) => return serve_500(request)
     };

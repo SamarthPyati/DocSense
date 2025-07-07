@@ -268,7 +268,7 @@ fn entry() -> Result<(), ()> {
             })?.chars().collect::<Vec<char>>();
 
             let model = fetch_model(&index_path)?;
-            for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
+            for (path, rank) in model.search_query(&prompt, &model)?.iter().take(20) {
                 println!("{path} - {rank}", path = path.display());
             } 
 
@@ -343,4 +343,3 @@ fn main() -> io::Result<()> {
 
 // TODO: Synonym terms
 // TODO: Add levenstein distance or cosine similarity
-// TODO: Add better document ranker specifically "Okapi BM-25"
