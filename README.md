@@ -1,118 +1,71 @@
-# DocSense: A Simple Document Search Engine
+# 📄 DocSense: A Simple Document Search Engine
 
----
-
-## Overview
-
-DocSense is a lightweight, command-line document search engine built with Rust. It's designed to index a corpus of XML/XHTML documents, calculate term frequency-inverse document frequency (TF-IDF) scores for keywords, and serve search queries via a local HTTP server. This project provides a practical example of text processing, indexing, and basic web serving in Rust.
+DocSense is a lightweight, search engine built in Rust. It is designed to index and search into a large corpus of XML/XHTML/PDF/TXT/MD documents using TF-IDF or BM25 ranking. It also serves a local web interface for querying.
 
 ---
 
 ## Features
 
-* **Document Indexing:** Indexes XML and XHTML files from a specified directory, recursively processing subdirectories.
-* **TF-IDF Ranking:** Utilizes the TF-IDF algorithm to rank documents by relevance to a given search query.
-* **Simple Lexer:** Custom lexer for tokenizing document content and search queries.
-* **Persistent Index:** Saves the generated index to a JSON file for quick loading.
-* **HTTP Server:** Provides a basic web interface for searching, accessible via your browser.
+- Recursive document indexing
+- TF-IDF / BM25 ranking algorithms
+- Fast tokenization via custom lexer
+- Persistent JSON index storage
+- Local HTTP web interface
 
 ---
 
 ## Getting Started
 
-### Prerequisites
-
-To build and run DocSense, you'll need:
-
-* [Rust](https://www.rust-lang.org/tools/install) (latest stable version recommended)
-
-### Building the Project
-
-Navigate to the project's root directory and compile the application:
+### Build
 
 ```bash
 cargo build --release
 ````
 
-The executable will be located at `target/release/DocSense`. You can also run it directly using `cargo run`.
+---
 
------
-
-### Usage
-
-DocSense offers three main subcommands: `index`, `check`, and `serve`.
-
-#### 1\. `index` - Indexing Your Documents
-
-This command indexes a specified folder containing your XML/XHTML documents and saves the generated TF-IDF index to a JSON file.
-
-**Syntax:**
+## 🧑‍💻 Usage
 
 ```bash
-./target/release/DocSense index <folder_path> [output_index_file.json]
+./target/release/DocSense <SUBCOMMAND> [OPTIONS]
 ```
 
-  * `<folder_path>`: The directory containing the documents to be indexed.
-  * `[output_index_file.json]` (Optional): The path where the index will be saved. Defaults to `index.json`.
+### 🔍 `index <folder> [output.json]`
 
-**Example:**
+Indexes supported files (`.xml`, `.xhtml`, `.pdf`, `.txt`, `.md`) and saves index.
 
 ```bash
-./target/release/DocSense index ./docs_corpus my_docs_index.json
+./DocSense index ./docs my_index.json
 ```
 
-This will index all `.xml` and `.xhtml` files within `./docs_corpus` and its subdirectories, saving the index to `my_docs_index.json`.
+### 📦 `check [index.json]`
 
-#### 2\. `check` - Inspecting the Index
-
-This command allows you to quickly check how many documents are present in a saved index file.
-
-**Syntax:**
+Prints how many documents are indexed.
 
 ```bash
-./target/release/DocSense check [input_index_file.json]
+./DocSense check my_index.json
 ```
 
-  * `[input_index_file.json]` (Optional): The path to the index file to check. Defaults to `index.json`.
+### 🌐 `serve <index.json> [address] --rank-method <bm25|tfidf>`
 
-**Example:**
+Starts a local search server with ranking.
 
 ```bash
-./target/release/DocSense check my_docs_index.json
+./DocSense serve my_index.json 127.0.0.1:8000 --rank-method bm25
 ```
 
-#### 3\. `serve` - Running the Search Server
+Then visit [http://localhost:8000](http://localhost:8000) in your browser.
 
-This command starts an HTTP server that allows you to submit search queries and receive ranked results based on a pre-built index.
+---
 
-**Syntax:**
+## 📂 Supported Formats
 
-```bash
-./target/release/DocSense serve <input_index_file.json> [address]
-```
+* XML / XHTML
+* TXT / Markdown
+* PDF (via Poppler)
 
-  * `<input_index_file.json>`: The path to the index file you want to use for searching.
-  * `[address]` (Optional): The IP address and port to bind the server to (e.g., `127.0.0.1:6969`). Defaults to `127.0.0.1:6969`.
+---
 
-**Example:**
+## 📃 License
 
-```bash
-./target/release/DocSense serve my_docs_index.json 0.0.0.0:8000
-```
-
-After starting the server, open your web browser and navigate to the specified address (e.g., `http://localhost:8000/` or `http://127.0.0.1:6969/`) to access the search interface.
-
------
-<!-- 
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome\! Feel free to check the [issues page](https://www.google.com/search?q=link_to_issues_page_if_applicable).
-
------
-
-## 📜 License
-
-This project is licensed under the [MIT License](https://www.google.com/search?q=LICENSE) - see the `LICENSE` file for details.
-
-```
-``` -->
+MIT – see [LICENSE](LICENSE) file.
