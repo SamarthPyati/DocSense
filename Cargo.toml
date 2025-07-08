@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.40", features = ["derive"] }
 colored = "3.0.0"
 poppler-rs = "0.24.1"
 rust-stemmers = "1.2.0"

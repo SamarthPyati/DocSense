@@ -11,6 +11,8 @@ use std::{
 }; 
 
 use colored::Colorize;
+use crate::RankMethod;
+
 use super::model::*;
 
 pub fn serve_404(request: Request) -> io::Result<()> {
@@ -44,7 +46,7 @@ pub fn serve_static_file(request: Request, file_path: &str, content_type: &str) 
 }
 
 
-pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()>{
+pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>, rank_method: RankMethod) -> io::Result<()>{
     let mut buf = Vec::new();
     // Read the entire body of request 
     if let Err(err) = request.as_reader().read_to_end(&mut buf) {
@@ -63,7 +65,7 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>) 
     println!("Recieved Query: \'{}\'", body.iter().collect::<String>().bright_blue());
 
     let model = model.lock().unwrap();
-    let results = match model.search_query(&body, &model) {
+    let results = match model.search_query(&body, &model, rank_method) {
         Ok(results) => results, 
         Err(()) => return serve_500(request)
     };
@@ -124,7 +126,7 @@ pub fn serve_api_stats(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io
     return request.respond(response);
 }
 
-pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::Result<()> {
+pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>, rank_method: RankMethod) -> io::Result<()> {
     println!("{info}: Received request! method: [{req}], url: {url:?}",
         info = "INFO".bright_cyan(), 
         req = &request.method().as_str().bright_green(),
@@ -142,7 +144,7 @@ pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::
         }
 
         (Method::Post, "/api/search") => {
-            serve_api_search(request, model)?
+            serve_api_search(request, model, rank_method)?
         }
 
         (Method::Get, "/api/stats") => {
@@ -158,7 +160,7 @@ pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>) -> io::
 }
 
 
-pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>) -> Result<(), ()> {
+pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>, rank_method: RankMethod) -> Result<(), ()> {
     let address_str = "http://".to_string() + &address + "/"; 
     let server = Server::http(address).map_err(|err| {
         eprintln!("{}: Could not create initiate server at {address} as {err}", "ERROR".bold().red(), address = address.bold().bright_blue(), err = err.to_string().red());
@@ -168,7 +170,7 @@ pub fn start(address: &str, model: Arc<Mutex<InMemoryModel>>) -> Result<(), ()> 
     println!("{info}: Server Listening at: {address}", info = "INFO".bright_cyan(), address = address_str.cyan());
 
     for request in server.incoming_requests() {
-        serve_request(request, Arc::clone(&model)).map_err(|err| {
+        serve_request(request, Arc::clone(&model), rank_method.clone()).map_err(|err| {
             eprintln!("{}: Failed to serve the request as {err}", "ERROR".bold().red(), err = err.to_string().red());
         }).ok(); // <- Don't stop here continue serving requests
     }

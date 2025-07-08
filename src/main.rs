@@ -1,14 +1,9 @@
 use std:: {
-    env::{self}, 
-    fs::{self, File}, 
-    io::{self, BufReader, BufWriter, Read}, 
-    path::Path, 
-    process::{exit, ExitCode}, 
-    str::{self}, 
-    sync::{Arc, Mutex}, 
-    thread
+    fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}, sync::{Arc, Mutex}, thread
 };
 
+
+use clap::{Parser, Subcommand, ValueEnum};
 use xml::{self, reader::XmlEvent, EventReader};
 use xml::common::{TextPosition, Position};
 use colored::{Colorize};
@@ -224,8 +219,6 @@ fn check_index(index_path: &str) -> Result<(), ()> {
     Ok(())  
 }
 
-const DEFAULT_INDEX_JSON_PATH: &str = "index.json";
-
 /* Fetch the InMemory model from an index file */
 fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     let index_file = fs::File::open(&index_path).map_err(|err| {
@@ -238,57 +231,78 @@ fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
 
     return Ok(model);
 }
-    
-fn usage(program: &String) {
-    eprintln!("{}: {program} [SUBCOMMAND] [OPTIONS]", "USAGE".bold().cyan(), program = program.bright_blue());
-    eprintln!("Subcommands:");
-    eprintln!("    search <index-file> <prompt>       Search query within a index file. (Default: Shows top 20 search results)");
-    eprintln!("    check  [index-file]                Quickly check how many documents are present in a saved index file (Default: index.json)");
-    eprintln!("    serve  <index-file> [address]      Starts an HTTP server with Web Interface based on a pre-built index (Default: localhost:6969)");
+
+#[derive(Parser)]
+#[command(name = "DocSense", version, author, about, long_about = None)]
+#[command(about = "A fast document indexing and search engine which runs locally on your machine.", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+enum RankMethod {
+    Tfidf, 
+    Bm25
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    #[command(
+        about = "Search for a query string in an indexed file",
+        long_about = "Search for a prompt string using BM25 (or TF-IDF) ranking algorithm across previously indexed documents."
+    )]
+    Search {
+        #[arg(help = "Path to the .json index file (e.g., index.docsense.json)")]
+        index_file_path: String, 
+        #[arg(help = "Search prompt string (e.g., 'deep neural networks')")]
+        prompt: String, 
+        #[arg(short, long, default_value = "tfidf", value_enum, help = "Ranking algorithm to use")]
+        rank_method: RankMethod,
+    }, 
+
+    #[command(
+        about = "Check how many files are indexed",
+        long_about = "Display number of documents currently indexed in the specified index file. Useful for verifying the index state."
+    )]
+    Check {
+        #[arg(default_value="index.json", help="Path to index file to inspect")]
+        index_file_path: String, 
+    }, 
+
+    #[command(
+        about = "Serve directory over HTTP with search interface",
+        long_about = "Indexes the provided directory recursively and starts a web server for querying indexed files through a UI."
+    )]
+    Serve {
+        #[arg(help = "Path to directory to index and serve")]
+        dir_path: String, 
+        #[arg(default_value = "127.0.0.1:6969", help = "IP:PORT to bind HTTP server (e.g., 0.0.0.0:8080)")]
+        address: String, 
+        #[arg(short, long, default_value = "tfidf", value_enum, help = "Ranking algorithm to use")]
+        rank_method: RankMethod,
+    }
 }
 
 fn entry() -> Result<(), ()> {
-    let mut args = env::args();
-    let program = args.next().expect("path to program is provided");
-    let subcommand = args.next().ok_or_else(|| {
-        usage(&program);
-        eprintln!("{}: no subcommand is provided", "ERROR".red().bold());
-    })?;
+    let cli = Cli::parse();
 
-    match subcommand.as_str() {
-        "search" => {
-            let index_path = args.next().ok_or_else(|| {
-                usage(&program);
-                eprintln!("{}: Index file path must provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            })?;
-
-            let prompt = args.next().ok_or_else(|| {
-                usage(&program);
-                eprintln!("{}: Prompt must be provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            })?.chars().collect::<Vec<char>>();
-
-            let model = fetch_model(&index_path)?;
-            for (path, rank) in model.search_query(&prompt, &model)?.iter().take(20) {
+    match cli.command {
+        Commands::Search {index_file_path, prompt, rank_method} => {
+            let prompt = prompt.chars().collect::<Vec<char>>();
+            let model = fetch_model(&index_file_path)?;
+            for (path, rank) in model.search_query(&prompt, &model, rank_method)?.iter().take(20) {
                 println!("{path} - {rank}", path = path.display());
             } 
 
             return Ok(());
         }
 
-        "check" => {
-            let index_path = args.next().unwrap_or(DEFAULT_INDEX_JSON_PATH.to_string());
-            check_index(&index_path).unwrap();
+        Commands::Check { index_file_path } => {
+            check_index(&index_file_path).unwrap();
         }
 
-        "serve" => {
-            let dir_path = args.next().ok_or_else(|| {
-                usage(&program);
-                eprintln!("{}: No directory path is provided for {} subcommand.", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            })?;
-
-            // Default address 
-            let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            
+        Commands::Serve { dir_path, address , rank_method} => {
             // IDEATE: Is it fine to place the index file in the folder itself or place in a root dir?
             let mut index_path = Path::new(&dir_path).to_path_buf(); 
             index_path.push(".docsense.json");
@@ -320,14 +334,8 @@ fn entry() -> Result<(), ()> {
                 });
             }
             // TODO: Print the information of server start at the end of logging
-            return server::start(&address, Arc::clone(&model));
+            return server::start(&address, Arc::clone(&model), rank_method);
         }   
-
-        _ => {
-            usage(&program);
-            eprintln!("{}: Unknown subcommand {}", "ERROR".bold().red(), subcommand.bold().bright_blue());
-            return Err(());
-        }
     }
     Ok(())
 }

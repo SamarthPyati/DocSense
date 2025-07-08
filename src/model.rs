@@ -9,7 +9,7 @@ use std::default::Default;
 use super::lexer::*;
 
 pub trait Model {
-    fn search_query(&self, query: &[char], model: &InMemoryModel) -> Result<Vec<(PathBuf, f32)>, ()>;
+    fn search_query(&self, query: &[char], model: &InMemoryModel, rank_method: RankMethod) -> Result<Vec<(PathBuf, f32)>, ()>;
     fn add_document(&mut self, path: PathBuf, content: &[char], last_modified: SystemTime) -> Result<(), ()>;
     fn requires_reindexing(&mut self, path: &Path, last_modified: SystemTime) -> Result<bool, ()>;
 }
@@ -100,14 +100,14 @@ impl InMemoryModel {
     }
 }
 
-static USE_BM25: bool = true;
+use crate::RankMethod;
 impl Model for InMemoryModel {
-    fn search_query(&self, query: &[char], model: &InMemoryModel) -> Result<Vec<(PathBuf, f32)>, ()> {
+    fn search_query(&self, query: &[char], model: &InMemoryModel, rank_method: RankMethod) -> Result<Vec<(PathBuf, f32)>, ()> {
         let tokens = Lexer::new(&query).collect::<Vec<_>>();
         
         let mut results = Vec::with_capacity(self.docs.len());
         for (path, doc) in &self.docs {
-            let rank = if USE_BM25 {
+            let rank = if rank_method == RankMethod::Bm25 {
                 // BM-25 Ranking
                 bm25_score(&tokens, doc, model)
             } else {
