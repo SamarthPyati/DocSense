@@ -1,8 +1,6 @@
-# 📄 DocSense: A Simple Document Search Engine
+# DocSense: A Simple Document Search Engine
 
 DocSense is a lightweight, search engine built in Rust. It is designed to index and search into a large corpus of XML/XHTML/PDF/TXT/MD documents using TF-IDF or BM25 ranking. It also serves a local web interface for querying.
-
----
 
 ## Features
 
@@ -12,7 +10,6 @@ DocSense is a lightweight, search engine built in Rust. It is designed to index 
 - Persistent JSON index storage
 - Local HTTP web interface
 
----
 
 ## Getting Started
 
@@ -22,15 +19,14 @@ DocSense is a lightweight, search engine built in Rust. It is designed to index 
 cargo build --release
 ````
 
----
 
-## 🧑‍💻 Usage
+##  Usage
 
 ```bash
 ./target/release/DocSense <SUBCOMMAND> [OPTIONS]
 ```
 
-### 🔍 `index <folder> [output.json]`
+### `index <folder> [output.json]`
 
 Indexes supported files (`.xml`, `.xhtml`, `.pdf`, `.txt`, `.md`) and saves index.
 
@@ -38,7 +34,7 @@ Indexes supported files (`.xml`, `.xhtml`, `.pdf`, `.txt`, `.md`) and saves inde
 ./DocSense index ./docs my_index.json
 ```
 
-### 📦 `check [index.json]`
+### `check [index.json]`
 
 Prints how many documents are indexed.
 
@@ -46,7 +42,7 @@ Prints how many documents are indexed.
 ./DocSense check my_index.json
 ```
 
-### 🌐 `serve <index.json> [address] --rank-method <bm25|tfidf>`
+### `serve <index.json> [address] --rank-method <bm25|tfidf>`
 
 Starts a local search server with ranking.
 
@@ -56,16 +52,14 @@ Starts a local search server with ranking.
 
 Then visit [http://localhost:8000](http://localhost:8000) in your browser.
 
----
 
-## 📂 Supported Formats
+## Supported Formats
 
 * XML / XHTML
 * TXT / Markdown
 * PDF (via Poppler)
 
----
 
-## 📃 License
+## License
 
-MIT – see [LICENSE](LICENSE) file.
+GPL - see [LICENSE](LICENSE) file.
