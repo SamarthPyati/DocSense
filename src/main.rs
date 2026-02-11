@@ -207,6 +207,8 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
 /* Check the amount of files present in the main frequency table index */
 fn check_index(index_path: &str) -> Result<(), ()> {
+    let a: f64 = 0.1;
+
     let index_file = fs::File::open(index_path).map_err(|err| {
         eprintln!("{}: Could not open file {file} as \"{err}\"", "ERROR".bold().red(), file = index_path.bright_blue(), err = err.to_string().red());
         exit(1);

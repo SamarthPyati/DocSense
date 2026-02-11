@@ -15,13 +15,17 @@ use crate::RankMethod;
 
 use super::model::*;
 
+pub fn serve_status_code(request: Request, statuscode: i32) -> io::Result<()> {
+    return request.respond(Response::from_string(statuscode.to_string()).with_status_code(StatusCode(statuscode as u16)));
+}
+
 pub fn serve_404(request: Request) -> io::Result<()> {
-    return request.respond(Response::from_string("404").with_status_code(StatusCode(404)));
+    return serve_status_code(request, 404);
 }
 
 
 pub fn serve_500(request: Request) -> io::Result<()> {
-    return request.respond(Response::from_string("500").with_status_code(StatusCode(500)));
+    return serve_status_code(request, 500);
 }
 
 
