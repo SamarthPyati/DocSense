@@ -1,5 +1,7 @@
 use rust_stemmers::{Algorithm, Stemmer};
 
+const STOP_WORDS: [&str; 4] = ["is", "as", "the", "a"];
+
 #[derive(Debug)]
 pub struct Lexer<'a> {
     content: &'a [char]
@@ -55,6 +57,13 @@ impl<'a> Lexer<'a> {
         if self.content[0].is_alphabetic() {
             let result = self.chop_while(|x| x.is_alphanumeric());
             let token = result.iter().collect::<String>();
+            
+            // Remove stop words
+            if STOP_WORDS.contains(&token.as_str()) {
+                return None;
+            }
+
+            // Stemming
             let stemmed_token = stemmer.stem(&token).into_owned().to_uppercase();
             return Some(stemmed_token);
         }

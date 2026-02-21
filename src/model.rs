@@ -26,7 +26,7 @@ pub type GlobalTermFreq = HashMap::<String, usize>;
 #[derive(Serialize, Deserialize)]
 pub struct Doc {
     count: usize,                   // Total number of terms (tokens) present in this document.
-    ft: FreqTable,                  //  Frequency table mapping each term to the number of times it appears within this document
+    ft: FreqTable,                  // Frequency table mapping each term to the number of times it appears within this document
     last_modified: SystemTime       // The last time this document was modified on disk. Used to detect outdated indexes and trigger reindexing when needed.
 }
 
@@ -81,8 +81,8 @@ fn tf(term: &str, doc: &Doc) -> f32 {
 }
 // For TF-IDF Ranking
 fn idf(term: &str, model: &InMemoryModel) -> f32 {
-    let n = model.docs.len() as f32;
-    let d  = model.gtf.get(term).cloned().unwrap_or(1) as f32;
+    let n = model.docs.len() as f32;                                    // total docs in corpus 
+    let d = model.gtf.get(term).cloned().unwrap_or(1) as f32;   // number of time the terms has appeared in the entire corpus
     f32::log10(n / d)
 }
 
