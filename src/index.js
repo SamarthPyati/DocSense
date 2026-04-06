@@ -24,7 +24,7 @@ async function search(prompt) {
     } else {
         for (let [path, rank] of data) {
             let link = document.createElement("a");
-            link.href = path;
+            link.href = "/file?path=" + encodeURIComponent(path);
             link.target = "_blank"; // open in new tab
             link.textContent = path;
             results.appendChild(link);

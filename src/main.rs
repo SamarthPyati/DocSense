@@ -276,8 +276,14 @@ fn entry() -> Result<(), ()> {
                 model = Arc::new(Mutex::new(Default::default()));
             }
             
+            let root_dir = fs::canonicalize(&dir_path).unwrap_or_else(|err| {
+                eprintln!("{}: Could not canonicalize root dir {dir_path} as {err}", "ERROR".bold().red(), dir_path = dir_path.bright_blue(), err = err.to_string().red());
+                exit(1);
+            });
+
             {
-                let model = Arc::clone(&model); 
+                let model = Arc::clone(&model);
+                let dir_path = dir_path.clone();
                 thread::spawn(move || {
                     let mut processed: usize = 0 as usize;
                     append_folder_to_model(Path::new(&dir_path), Arc::clone(&model), &mut processed).unwrap();
@@ -291,7 +297,7 @@ fn entry() -> Result<(), ()> {
                 });
             }
             // TODO: Print the information of server start at the end of logging
-            return server::start(&address, Arc::clone(&model), rank_method);
+            return server::start(&address, Arc::clone(&model), rank_method, root_dir);
         }   
     }
     Ok(())
