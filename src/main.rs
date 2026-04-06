@@ -225,11 +225,11 @@ fn check_index(index_path: &str) -> Result<(), ()> {
 fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     let index_file = fs::File::open(&index_path).map_err(|err| {
         eprintln!("{}: Could not open file {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
-    }).unwrap();
+    })?;
 
     let model = serde_json::from_reader(BufReader::new(index_file)).map_err(|err| {
         eprintln!("{}: Serde failed to read {file_path} as \"{err}\"", "ERROR".bold().red(), file_path = index_path.bright_blue(), err = err.to_string().red());
-    }).unwrap();
+    })?;
 
     return Ok(model);
 }

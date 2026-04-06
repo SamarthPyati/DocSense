@@ -93,7 +93,7 @@ impl InMemoryModel {
             for term in doc.ft.keys() {
                 // Update the GlobalTermFrequency table
                 if let Some(freq) = self.gtf.get_mut(term) {
-                    *freq -= freq.saturating_sub(1);
+                    *freq = freq.saturating_sub(1);
                 }
             }
         }
