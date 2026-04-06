@@ -1,5 +1,5 @@
 use std:: {
-    fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::Path, process::{exit, ExitCode}, str::{self}, sync::{Arc, Mutex}, thread
+    collections::HashSet, fs::{self, File}, io::{self, BufReader, BufWriter, Read}, path::{Path, PathBuf}, process::{exit, ExitCode}, str::{self}, sync::{Arc, Mutex}, thread
 };
 
 use parser::{Cli, Commands};
@@ -123,7 +123,7 @@ fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()>
 const ALLOWED_FILE_TYPE_EXTENSIONS: [&str; 5] = ["xml", "xhtml", "txt", "md", "pdf"];
 
 /* Indexes a folder as a json file and adds to model, Processed is the number of file indexed */
-fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, processed: &mut usize) -> Result<(), ()> {
+fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, processed: &mut usize, visited: &mut HashSet<PathBuf>) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("{}: Failed to read directory {dir_path} as \"{err}\"", "ERROR".bold().red(), 
                                                                             dir_path = dir_path.to_str().unwrap().bold().bright_blue(), 
@@ -174,7 +174,7 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
         // Recursively index all the folders
         if file_type.is_dir() {
-            append_folder_to_model(&file_path, Arc::clone(&model), processed)?;
+            append_folder_to_model(&file_path, Arc::clone(&model), processed, visited)?;
             continue 'step;
         }   
 
@@ -184,6 +184,8 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
             file_path.display().to_string().bright_blue(),
             err.to_string().red());
         })?;
+
+        visited.insert(file_path.clone());
         
         // Main 
         let mut model = model.lock().unwrap();
@@ -234,6 +236,42 @@ fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     return Ok(model);
 }
 
+fn index_directory(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, index_path: Option<&str>) -> Result<(), ()> {
+    let root_dir = fs::canonicalize(dir_path).unwrap_or_else(|err| {
+        eprintln!("{}: Could not canonicalize root dir {} as {}", "ERROR".bold().red(), dir_path.display().to_string().bright_blue(), err.to_string().red());
+        exit(1);
+    });
+
+    let mut processed: usize = 0;
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    
+    append_folder_to_model(&root_dir, Arc::clone(&model), &mut processed, &mut visited)?;
+    
+    // Purge deleted files
+    let mut model_lock = model.lock().unwrap();
+    let mut to_remove = Vec::new();
+    
+    for path in model_lock.docs.keys() {
+        if path.starts_with(&root_dir) && !visited.contains(path) {
+            to_remove.push(path.clone());
+        }
+    }
+    
+    for path in to_remove {
+        model_lock.remove_document(&path);
+        println!("{}: Removed deleted file {}", "INFO".cyan(), path.display().to_string().bright_yellow());
+        processed += 1;
+    }
+
+    // Save the model only when some files were added/modified/deleted
+    if processed > 0 {
+        if let Some(p) = index_path {
+            save_model_as_json(&model_lock, p)?;
+        }
+    }
+    println!("{}: Finished indexing ...", "INFO".cyan());
+    Ok(())
+}
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 enum RankMethod {
@@ -257,6 +295,16 @@ fn entry() -> Result<(), ()> {
 
         Commands::Check { index_file_path } => {
             check_index(&index_file_path).unwrap();
+        }
+
+        Commands::Index { dir_path, output_file } => {
+            let model = Arc::new(Mutex::new(Default::default()));
+            let output_path = output_file.unwrap_or_else(|| {
+                let mut p = Path::new(&dir_path).to_path_buf();
+                p.push(".docsense.json");
+                p.to_str().unwrap().to_string()
+            });
+            index_directory(Path::new(&dir_path), model, Some(&output_path))?;
         }
 
         Commands::Serve { dir_path, address , rank_method} => {
@@ -285,15 +333,8 @@ fn entry() -> Result<(), ()> {
                 let model = Arc::clone(&model);
                 let dir_path = dir_path.clone();
                 thread::spawn(move || {
-                    let mut processed: usize = 0 as usize;
-                    append_folder_to_model(Path::new(&dir_path), Arc::clone(&model), &mut processed).unwrap();
-                    
-                    // Save the model only when some files are processed
-                    if processed > 0 {
-                        let model= model.lock().unwrap();
-                        save_model_as_json(&model, index_path.to_str().unwrap()).unwrap();
-                    }
-                    println!("{}: Finished indexing ...", "INFO".cyan());
+                    let index_str = index_path.to_str().unwrap().to_string();
+                    index_directory(Path::new(&dir_path), model, Some(&index_str)).unwrap();
                 });
             }
             // TODO: Print the information of server start at the end of logging

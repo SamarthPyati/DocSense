@@ -34,6 +34,17 @@ pub enum Commands {
     }, 
 
     #[command(
+        about = "Index a directory for offline search",
+        long_about = "Indexes the provided directory recursively and saves the model to a JSON file."
+    )]
+    Index {
+        #[arg(help = "Path to directory to index")]
+        dir_path: String,
+        #[arg(help = "Path to save the generated index json file. Defaults to <dir_path>/.docsense.json")]
+        output_file: Option<String>,
+    },
+
+    #[command(
         about = "Serve directory over HTTP with search interface",
         long_about = "Indexes the provided directory recursively and starts a web server for querying indexed files through a UI."
     )]

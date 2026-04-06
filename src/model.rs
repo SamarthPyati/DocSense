@@ -95,7 +95,7 @@ fn idf(term: &str, model: &InMemoryModel) -> f32 {
 }
 
 impl InMemoryModel {
-    fn remove_document(&mut self, file_path: &Path) {
+    pub fn remove_document(&mut self, file_path: &Path) {
         if let Some(doc) = self.docs.remove(file_path) {
             // Keep the cached total in sync
             self.total_tokens = self.total_tokens.saturating_sub(doc.count);
