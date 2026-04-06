@@ -49,8 +49,8 @@ pub fn serve_static_file(request: Request, file_path: &str, content_type: &str) 
     return request.respond(Response::from_file(html_file).with_header(header));
 }
 
-/// Serves a compile-time-embedded string (HTML, JS, etc.) directly from memory.
-/// This avoids any dependency on the binary's working directory.
+// Serves a compile-time-embedded string (HTML, JS, etc.) directly from memory.
+// This avoids any dependency on the binary's working directory.
 pub fn serve_embedded(request: Request, content: &'static str, content_type: &'static str) -> io::Result<()> {
     let header = Header::from_bytes("Content-Type", content_type)
         .expect("Should be a valid Content-Type while passing the header.");

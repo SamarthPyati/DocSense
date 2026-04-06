@@ -1,18 +1,375 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DocSense</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="DocSense — fast local document search using TF-IDF and BM25 ranking." />
+  <title>DocSense</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0c0c10;
+      --surface:   #13131a;
+      --border:    rgba(255,255,255,0.07);
+      --border-focus: rgba(139,92,246,0.5);
+      --accent:    #8b5cf6;
+      --accent-dim: rgba(139,92,246,0.15);
+      --text:      #e2e2e9;
+      --muted:     #6b6b7a;
+      --danger:    #f87171;
+      --radius:    14px;
+      --font:      'Inter', system-ui, sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ── */
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding: 0 24px;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: min(18vh, 140px);
+      width: 100%;
+    }
+
+    /* ── Wordmark ── */
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 40px;
+    }
+
+    .wordmark-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #8b5cf6, #6366f1);
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+
+    .wordmark-icon svg { display: block; }
+
+    .wordmark-name {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+
+    .wordmark-tag {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Search box ── */
+    .search-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+      transition: color 0.2s;
+    }
+
+    #query {
+      width: 100%;
+      height: 56px;
+      padding: 0 52px 0 50px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 400;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+    }
+
+    #query::placeholder { color: var(--muted); }
+
+    #query:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(139,92,246,0.12), 0 1px 2px rgba(0,0,0,0.4);
+    }
+
+    #query:focus + .search-icon-right,
+    #query:focus ~ .search-icon { color: var(--accent); }
+
+    .search-hint {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 0.15s;
+    }
+
+    .search-hint.hidden { opacity: 0; }
+
+    .kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      padding: 0 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      position: absolute;
+      right: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      display: none;
+      animation: spin 0.65s linear infinite;
+    }
+    .spinner.active { display: block; }
+    @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+
+    /* ── Results ── */
+    #results {
+      width: 100%;
+      max-width: 640px;
+      margin-top: 12px;
+    }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 4px 8px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.03em;
+    }
+
+    .result-list { display: flex; flex-direction: column; gap: 2px; }
+
+    .result-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--text);
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      animation: fadeUp 0.18s ease both;
+    }
+
+    .result-item:hover {
+      background: rgba(139,92,246,0.07);
+      border-color: rgba(139,92,246,0.25);
+      transform: translateY(-1px);
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-item:nth-child(2)  { animation-delay: 0.03s; }
+    .result-item:nth-child(3)  { animation-delay: 0.06s; }
+    .result-item:nth-child(4)  { animation-delay: 0.09s; }
+    .result-item:nth-child(5)  { animation-delay: 0.12s; }
+    .result-item:nth-child(6)  { animation-delay: 0.15s; }
+    .result-item:nth-child(7)  { animation-delay: 0.18s; }
+    .result-item:nth-child(8)  { animation-delay: 0.21s; }
+    .result-item:nth-child(9)  { animation-delay: 0.24s; }
+    .result-item:nth-child(10) { animation-delay: 0.27s; }
+
+    .ext-badge {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .ext-xml, .ext-xhtml { background: rgba(251,146,60,0.12); color: #fb923c; }
+    .ext-pdf             { background: rgba(248,113,113,0.12); color: #f87171; }
+    .ext-txt, .ext-md    { background: rgba(139,92,246,0.12);  color: #a78bfa; }
+    .ext-default         { background: rgba(107,107,122,0.15); color: var(--muted); }
+
+    .result-body { flex: 1; min-width: 0; }
+
+    .result-filename {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .result-path {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+
+    .result-rank {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+    }
+
+    /* ── Empty / Error states ── */
+    .state-msg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 40px 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+      animation: fadeUp 0.2s ease;
+    }
+
+    .state-msg svg { opacity: 0.4; }
+    .state-msg.error { color: var(--danger); }
+
+    /* ── Stats footer ── */
+    footer {
+      padding: 20px 0;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .stat-item { display: flex; align-items: center; gap: 5px; }
+    .stat-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.6;
+    }
+  </style>
 </head>
 <body>
-    <center>
-        <h1><b>DocSense</b></h1>
-        <h2>Query:    </h2>
-        <input type="text" id="query"/>
-        <div id="results"></div>
-    </center>
+  <div class="page">
+    <div class="main">
+      <div class="wordmark">
+        <div class="wordmark-icon">
+          <!-- doc + magnifier icon -->
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="rgba(255,255,255,0.9)" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M12 3v4h4" stroke="rgba(255,255,255,0.9)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="9.5" cy="11.5" r="2" stroke="rgba(255,255,255,0.9)" stroke-width="1.4"/>
+            <path d="M11 13l1.5 1.5" stroke="rgba(255,255,255,0.9)" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="wordmark-name">DocSense</div>
+          <div class="wordmark-tag">Local document search</div>
+        </div>
+      </div>
 
+      <div class="search-wrap">
+        <!-- search icon -->
+        <svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M12.5 12.5L16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+
+        <input
+          id="query"
+          type="text"
+          placeholder="Search your documents…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Search query"
+        />
+
+        <div class="search-hint" id="hint">
+          <span class="kbd">↵</span>
+        </div>
+        <div class="spinner" id="spinner"></div>
+      </div>
+
+      <div id="results" aria-live="polite" aria-label="Search results"></div>
+    </div>
+
+    <footer id="stats">
+      <span class="stat-item">
+        <span class="stat-dot"></span>
+        <span id="stat-docs">—</span> documents indexed
+      </span>
+      <span class="stat-item">
+        <span class="stat-dot"></span>
+        <span id="stat-terms">—</span> unique terms
+      </span>
+    </footer>
+  </div>
+
+  <script src="index.js"></script>
 </body>
-<script src="index.js"></script>
 </html>
