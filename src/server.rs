@@ -49,6 +49,14 @@ pub fn serve_static_file(request: Request, file_path: &str, content_type: &str) 
     return request.respond(Response::from_file(html_file).with_header(header));
 }
 
+/// Serves a compile-time-embedded string (HTML, JS, etc.) directly from memory.
+/// This avoids any dependency on the binary's working directory.
+pub fn serve_embedded(request: Request, content: &'static str, content_type: &'static str) -> io::Result<()> {
+    let header = Header::from_bytes("Content-Type", content_type)
+        .expect("Should be a valid Content-Type while passing the header.");
+    request.respond(Response::from_string(content).with_header(header))
+}
+
 
 pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>, rank_method: RankMethod) -> io::Result<()>{
     let mut buf = Vec::new();
@@ -236,11 +244,13 @@ pub fn serve_request(request: Request, model: Arc<Mutex<InMemoryModel>>, rank_me
     match (&request.method(), request_url.as_str()) {
         
         (Method::Get, "/") | (Method::Get, "/index.html") => {
-            serve_static_file(request, "src/index.html", "text/html; charset=utf-8")?
+            static HTML: &str = include_str!("index.html");
+            serve_embedded(request, HTML, "text/html; charset=utf-8")?
         }
 
         (Method::Get, "/index.js") => {
-            serve_static_file(request, "src/index.js", "text/javascript; charset=utf-8")?
+            static JS: &str = include_str!("index.js");
+            serve_embedded(request, JS, "text/javascript; charset=utf-8")?
         }
 
         (Method::Get, url) if url.starts_with("/file") => {
