@@ -1,7 +1,6 @@
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use std::{
     self,
-    cmp::Ordering,
     fs::{self, File},
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -82,15 +81,13 @@ pub fn serve_api_search(mut request: Request, model: Arc<Mutex<InMemoryModel>>, 
         Err(()) => return serve_500(request)
     };
     
-    let mut content= Vec::new();
-    // Display document ranks (if rank turns 0 while iterating, stop from there)
-    for (path, rank) in results.iter().take(10) {
-        if rank.partial_cmp(&0f32) == Some(Ordering::Equal) {
-            break;
-        }
-        println!("      {} => {}", path.display(), rank);
-        content.push((path, rank));
-    } 
+    // Collect top-10 results with rank > 0. Use filter (not break) in case
+    // fuzzy results produce a non-zero score after a zero-score result.
+    let content: Vec<_> = results.iter()
+        .filter(|(_, rank)| *rank > 0.0)
+        .take(10)
+        .inspect(|(path, rank)| println!("      {} => {}", path.display(), rank))
+        .collect();
 
     let json = match serde_json::to_string(&content) {
         Ok(json) => json, 

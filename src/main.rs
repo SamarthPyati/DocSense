@@ -353,5 +353,4 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-// TODO: Synonym terms
-// TODO: Add levenstein distance or cosine similarity
+// TODO: Synonym terms / semantic expansion
