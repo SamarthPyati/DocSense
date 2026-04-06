@@ -34,13 +34,17 @@ pub type Docs = HashMap::<PathBuf, Doc>;
 
 #[derive(Default, Deserialize, Serialize)]
 pub struct InMemoryModel {
-    pub gtf: GlobalTermFreq, 
-    pub docs: Docs, 
+    pub gtf: GlobalTermFreq,
+    pub docs: Docs,
+    /// Cached sum of all doc.count values. Kept in sync by add_document /
+    /// remove_document so that avgdl can be computed in O(1) at query time.
+    pub total_tokens: usize,
 }
 
+/// O(1) — uses the cached total_tokens field instead of iterating all docs.
 fn compute_avgdl(model: &InMemoryModel) -> f32 {
-    let total: usize = model.docs.values().map(|doc| doc.count).sum();
-    total as f32 / model.docs.len() as f32
+    if model.docs.is_empty() { return 0.0; }
+    model.total_tokens as f32 / model.docs.len() as f32
 }
 
 fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
@@ -56,16 +60,16 @@ fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
 // K and B are free parameters, usually chosen, in absence of an advanced optimization, as K = [1.2, 2.0] and B = 0.75
 const K: f32 = 2.0;
 const B: f32 = 0.75;
-fn bm25_score(query: &Vec<String>, doc: &Doc, model: &InMemoryModel) -> f32 {
+/// avgdl is passed in so it can be computed once per query rather than once per document.
+fn bm25_score(query: &Vec<String>, doc: &Doc, model: &InMemoryModel, avgdl: f32) -> f32 {
     // Ranking documents according to BM25 Algorithm: https://en.wikipedia.org/wiki/Okapi_BM25
-    let mut score= 0f32;
-    let avgdl = compute_avgdl(model);
+    let mut score = 0f32;
     let doc_length = doc.count as f32;
 
     for term in query {
         // Number of times a term occurs in the document
         let tf = doc.ft.get(term).copied().unwrap_or(0) as f32;
-        let idf = compute_idf(&term, model);
+        let idf = compute_idf(term, model);
 
         let denom = tf + K * (1f32 - B + B * doc_length / avgdl);
         score += idf * tf * (K + 1f32) / denom;
@@ -88,8 +92,9 @@ fn idf(term: &str, model: &InMemoryModel) -> f32 {
 
 impl InMemoryModel {
     fn remove_document(&mut self, file_path: &Path) {
-        // Remove the doc from docs 
         if let Some(doc) = self.docs.remove(file_path) {
+            // Keep the cached total in sync
+            self.total_tokens = self.total_tokens.saturating_sub(doc.count);
             for term in doc.ft.keys() {
                 // Update the GlobalTermFrequency table
                 if let Some(freq) = self.gtf.get_mut(term) {
@@ -103,13 +108,16 @@ impl InMemoryModel {
 use crate::RankMethod;
 impl Model for InMemoryModel {
     fn search_query(&self, query: &[char], model: &InMemoryModel, rank_method: RankMethod) -> Result<Vec<(PathBuf, f32)>, ()> {
-        let tokens = Lexer::new(&query).collect::<Vec<_>>();
-        
+        let tokens = Lexer::new(query).collect::<Vec<_>>();
+
+        // Compute avgdl once per query (O(1) with cached total_tokens).
+        let avgdl = compute_avgdl(self);
+
         let mut results = Vec::with_capacity(self.docs.len());
         for (path, doc) in &self.docs {
             let rank = if rank_method == RankMethod::Bm25 {
-                // BM-25 Ranking
-                bm25_score(&tokens, doc, model)
+                // BM-25 Ranking — avgdl already computed above, not per-doc
+                bm25_score(&tokens, doc, model, avgdl)
             } else {
                 // TF-IDF Ranking
                 tokens.iter()
@@ -136,16 +144,19 @@ impl Model for InMemoryModel {
             ft.entry(token.clone()).and_modify(|x| *x += 1).or_insert(1);
         }
         
-        // Total count of terms in FreqTable 
-        let term_count = ft.iter().map(|(_, c)| *c).sum();
+        // Total count of terms in FreqTable
+        let term_count: usize = ft.values().sum();
 
         // Update global term frequency
         for term in ft.keys() {
             self.gtf.entry(term.to_owned()).and_modify(|x| *x += 1).or_insert(1);
         }
 
+        // Keep the cached total in sync
+        self.total_tokens += term_count;
+
         // Update the Docs table
-        self.docs.insert(file_path, Doc { count: term_count, ft: ft , last_modified: last_modified});
+        self.docs.insert(file_path, Doc { count: term_count, ft, last_modified });
         Ok(())
     }
 
@@ -157,5 +168,4 @@ impl Model for InMemoryModel {
     }
 }
 
-// TODO: BM25 is very slow, optimize it 
-// TODO: Implement a efficient sqlite Model with parellel processing support
+// TODO: Implement an efficient sqlite Model with parallel processing support
