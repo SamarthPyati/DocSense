@@ -60,9 +60,9 @@ fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
 // K and B are free parameters, usually chosen, in absence of an advanced optimization, as K = [1.2, 2.0] and B = 0.75
 const K: f32 = 2.0;
 const B: f32 = 0.75;
-/// avgdl is passed in so it can be computed once per query rather than once per document.
 fn bm25_score(query: &Vec<String>, doc: &Doc, model: &InMemoryModel, avgdl: f32) -> f32 {
     // Ranking documents according to BM25 Algorithm: https://en.wikipedia.org/wiki/Okapi_BM25
+    if avgdl == 0.0 { return 0.0; }  // guard: no tokens in corpus means undefined avgdl
     let mut score = 0f32;
     let doc_length = doc.count as f32;
 
@@ -72,21 +72,25 @@ fn bm25_score(query: &Vec<String>, doc: &Doc, model: &InMemoryModel, avgdl: f32)
         let idf = compute_idf(term, model);
 
         let denom = tf + K * (1f32 - B + B * doc_length / avgdl);
+        // denom can only be zero if tf==0 and avgdl is infinite, guard to be safe
+        if denom == 0.0 { continue; }
         score += idf * tf * (K + 1f32) / denom;
     }
     score
 }
 
-// For TF-IDF Ranking 
+// For TF-IDF Ranking
 fn tf(term: &str, doc: &Doc) -> f32 {
-    let n = doc.ft.get(term).cloned().unwrap_or(0) as f32;     // Number of times term occured in document
-    let d = doc.count as f32;                                           // Total number of terms present in document 
-    n / d   
+    if doc.count == 0 { return 0.0; }  // guard: doc had no surviving tokens
+    let n = doc.ft.get(term).cloned().unwrap_or(0) as f32;  // occurrences in this doc
+    let d = doc.count as f32;                               // total tokens in this doc
+    n / d
 }
 // For TF-IDF Ranking
 fn idf(term: &str, model: &InMemoryModel) -> f32 {
-    let n = model.docs.len() as f32;                                    // total docs in corpus 
-    let d = model.gtf.get(term).cloned().unwrap_or(1) as f32;   // number of time the terms has appeared in the entire corpus
+    let n = model.docs.len() as f32;  // total docs in corpus
+    if n == 0.0 { return 0.0; }       // guard: empty corpus → no meaningful IDF
+    let d = model.gtf.get(term).cloned().unwrap_or(1) as f32;  // docs containing term
     f32::log10(n / d)
 }
 
@@ -129,7 +133,8 @@ impl Model for InMemoryModel {
         }
 
         // Rank the files in desc order
-        results.sort_by(|(_, ra), (_, rb)| rb.partial_cmp(ra).expect("Compared with NaN values"));
+        // partial_cmp returns None only for NaN; treat NaN as equal rather than panicking.
+        results.sort_by(|(_, ra), (_, rb)| rb.partial_cmp(ra).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)
     }
 
@@ -146,6 +151,12 @@ impl Model for InMemoryModel {
         
         // Total count of terms in FreqTable
         let term_count: usize = ft.values().sum();
+
+        // Skip documents with no surviving tokens (e.g. all content was stop words).
+        // Indexing them would give doc.count=0, causing tf()=0/0=NaN at query time.
+        if term_count == 0 {
+            return Ok(());
+        }
 
         // Update global term frequency
         for term in ft.keys() {
