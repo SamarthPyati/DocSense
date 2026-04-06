@@ -55,24 +55,102 @@ fn compute_idf(term: &str, model: &InMemoryModel) -> f32 {
     f32::ln(((total_docs - doc_freq + 0.5) + 1f32) / (doc_freq + 0.5))
 }
 
+/// Levenshtein edit distance between two strings.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i-1] == b[j-1] { 0 } else { 1 };
+            curr[j] = (curr[j-1]+1).min(prev[j]+1).min(prev[j-1]+cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Expands a single stemmed/uppercased query token into a list of `(indexed_term, weight)`
+/// pairs drawn from the corpus's GTF, using:
+///   - Exact match            → weight 1.0
+///   - Prefix overlap (≥4 ch) → weight ∝ overlap ratio × 0.85
+///   - Levenshtein distance   → weight ∝ similarity × 0.75
+///
+/// Tokens shorter than 4 chars only allow exact matches to avoid noisy expansion.
+fn expand_query_token(query_token: &str, gtf: &GlobalTermFreq) -> Vec<(String, f32)> {
+    let qlen = query_token.len();
+    let max_dist: usize = match qlen {
+        0..=3 => 0,
+        4..=5 => 1,
+        6..=7 => 1,
+        _ => 2,
+    };
+
+    let mut matches: HashMap<String, f32> = HashMap::new();
+
+    for term in gtf.keys() {
+        let tlen = term.len();
+
+        // Exact match
+        if term.as_str() == query_token {
+            matches.insert(term.clone(), 1.0);
+            continue;
+        }
+
+        if max_dist == 0 { continue; }
+
+        // Prefix match: one token is a prefix of the other (min 4 chars)
+        if qlen >= 4 && tlen >= 4 {
+            if term.starts_with(query_token) || query_token.starts_with(term.as_str()) {
+                let shorter = qlen.min(tlen) as f32;
+                let longer  = qlen.max(tlen) as f32;
+                let weight  = (shorter / longer) * 0.85;
+                if weight >= 0.5 {
+                    matches.entry(term.clone())
+                        .and_modify(|w| *w = w.max(weight))
+                        .or_insert(weight);
+                    continue;
+                }
+            }
+        }
+
+        // Levenshtein: skip pairs whose length difference already exceeds the budget
+        if qlen.abs_diff(tlen) > max_dist { continue; }
+        let dist = levenshtein_distance(query_token, term);
+        if dist > 0 && dist <= max_dist {
+            let similarity = 1.0 - (dist as f32 / qlen.max(tlen) as f32);
+            let weight = similarity * 0.75;
+            matches.entry(term.clone())
+                .and_modify(|w| *w = w.max(weight))
+                .or_insert(weight);
+        }
+    }
+
+    matches.into_iter().collect()
+}
+
 // K and B are free parameters, usually chosen, in absence of an advanced optimization, as K = [1.2, 2.0] and B = 0.75
 const K: f32 = 2.0;
 const B: f32 = 0.75;
-fn bm25_score(query: &Vec<String>, doc: &Doc, model: &InMemoryModel, avgdl: f32) -> f32 {
+/// avgdl is pre-computed once per query. Each (term, weight) pair's contribution
+/// is scaled by `weight`, allowing fuzzy-matched tokens to contribute less than exact ones.
+fn bm25_score(query: &[(String, f32)], doc: &Doc, model: &InMemoryModel, avgdl: f32) -> f32 {
     // Ranking documents according to BM25 Algorithm: https://en.wikipedia.org/wiki/Okapi_BM25
     if avgdl == 0.0 { return 0.0; }  // guard: no tokens in corpus means undefined avgdl
     let mut score = 0f32;
     let doc_length = doc.count as f32;
 
-    for term in query {
-        // Number of times a term occurs in the document
-        let tf = doc.ft.get(term).copied().unwrap_or(0) as f32;
+    for (term, weight) in query {
+        let tf = doc.ft.get(term.as_str()).copied().unwrap_or(0) as f32;
         let idf = compute_idf(term, model);
-
         let denom = tf + K * (1f32 - B + B * doc_length / avgdl);
-        // denom can only be zero if tf==0 and avgdl is infinite, guard to be safe
         if denom == 0.0 { continue; }
-        score += idf * tf * (K + 1f32) / denom;
+        score += weight * idf * tf * (K + 1f32) / denom;
     }
     score
 }
@@ -112,25 +190,37 @@ impl Model for InMemoryModel {
     fn search_query(&self, query: &[char], model: &InMemoryModel, rank_method: RankMethod) -> Result<Vec<(PathBuf, f32)>, ()> {
         let tokens = Lexer::new(query).collect::<Vec<_>>();
 
+        // Expand each query token into (indexed_term, weight) pairs via exact,
+        // prefix, and Levenshtein fuzzy matching. If the same indexed term is
+        // reached through multiple paths, keep the highest weight.
+        let mut token_weights: HashMap<String, f32> = HashMap::new();
+        for token in &tokens {
+            for (matched_term, weight) in expand_query_token(token, &self.gtf) {
+                token_weights
+                    .entry(matched_term)
+                    .and_modify(|w| *w = w.max(weight))
+                    .or_insert(weight);
+            }
+        }
+        let expanded: Vec<(String, f32)> = token_weights.into_iter().collect();
+
         // Compute avgdl once per query (O(1) with cached total_tokens).
         let avgdl = compute_avgdl(self);
 
         let mut results = Vec::with_capacity(self.docs.len());
         for (path, doc) in &self.docs {
             let rank = if rank_method == RankMethod::Bm25 {
-                // BM-25 Ranking — avgdl already computed above, not per-doc
-                bm25_score(&tokens, doc, model, avgdl)
+                // BM-25 Ranking — weighted fuzzy tokens, avgdl pre-computed
+                bm25_score(&expanded, doc, model, avgdl)
             } else {
-                // TF-IDF Ranking
-                tokens.iter()
-                    .map(|token| tf(token, doc) * idf(token, model))
+                // TF-IDF Ranking — weighted by fuzzy match quality
+                expanded.iter()
+                    .map(|(token, weight)| tf(token, doc) * idf(token, model) * weight)
                     .sum()
             };
-
             results.push((path.to_owned(), rank));
         }
 
-        // Rank the files in desc order
         // partial_cmp returns None only for NaN; treat NaN as equal rather than panicking.
         results.sort_by(|(_, ra), (_, rb)| rb.partial_cmp(ra).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)
