@@ -36,12 +36,10 @@ pub type Docs = HashMap::<PathBuf, Doc>;
 pub struct InMemoryModel {
     pub gtf: GlobalTermFreq,
     pub docs: Docs,
-    /// Cached sum of all doc.count values. Kept in sync by add_document /
-    /// remove_document so that avgdl can be computed in O(1) at query time.
+    // Cached sum of all doc.count values. Kept in sync by add_document /
+    // remove_document so that avgdl can be computed in O(1) at query time.
     pub total_tokens: usize,
 }
-
-/// O(1) — uses the cached total_tokens field instead of iterating all docs.
 fn compute_avgdl(model: &InMemoryModel) -> f32 {
     if model.docs.is_empty() { return 0.0; }
     model.total_tokens as f32 / model.docs.len() as f32

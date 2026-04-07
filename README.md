@@ -5,8 +5,8 @@ DocSense is a lightweight, search engine built in Rust. It is designed to index 
 ## Features
 
 - **Recursive Document Indexing:** Parses through deeply nested directories.
-- **Dynamic Re-indexing:** Automatically cleans up deleted files and integrates new modifications incrementally.
-- **Two Ranking Architectures:** 
+- **Dynamic Re-indexing:** Automatically prunes deleted files and integrates new modifications incrementally.
+- **Two Ranking Algorithms:** 
   - **BM25 (Default):** O(N) optimized complexity with pre-cached lengths.
   - **TF-IDF:** Classic term frequency-inverse document frequency weighting.
 <!-- - **Fuzzy Semantic Matching:** Implements Prefix-overlap and Levenshtein distance expansion to find partial matches or misspelled tokens (e.g. searching "neural" will match "neural network" papers). -->
@@ -46,7 +46,7 @@ Recursively indexes the specified directory, spins up the embedded HTTP server, 
 
 ```bash
 # Serves the docs folder on port 6969
-./DocSense serve ./docs 127.0.0.1:6969
+./target/release/Docsense serve ./docs 127.0.0.1:6969
 ```
 *Options:*
 - `--rank-method <tfidf|bm25>`: Switch the core ranking algorithm. (Default: `tfidf`)
@@ -57,10 +57,10 @@ Generates the `.docsense.json` index file for a directory without starting the w
 
 ```bash
 # Automatically saves index to ./docs/.docsense.json
-./DocSense index ./docs 
+./target/release/Docsense index ./docs 
 
 # Or specify a custom output target
-./DocSense index ./docs path/to/my_index.json
+./target/release/Docsense index ./docs path/to/my_index.json
 ```
 
 ### 3. `search` (CLI Search)
@@ -68,7 +68,7 @@ Generates the `.docsense.json` index file for a directory without starting the w
 Perform a search directly from the terminal against a pre-built index file.
 
 ```bash
-./DocSense search ./docs/.docsense.json "attention networks" --rank-method bm25
+./target/release/Docsense search ./docs/.docsense.json "attention networks" --rank-method bm25
 ```
 
 ### 4. `check` (Index Stats)
@@ -76,7 +76,7 @@ Perform a search directly from the terminal against a pre-built index file.
 Inspect a compiled JSON index to see the total number of processed entries.
 
 ```bash
-./DocSense check ./docs/.docsense.json
+./target/release/Docsense check ./docs/.docsense.json
 ```
 
 ---
