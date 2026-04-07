@@ -48,32 +48,34 @@ impl<'a> Lexer<'a> {
 
     fn next_token(&mut self) -> Option<String> {
         let stemmer = Stemmer::create(Algorithm::English);
-        self.trim_left();
+        loop {
+            self.trim_left();
 
-        if self.content.len() == 0 {
-            return None;
-        }
-
-        if self.content[0].is_numeric() {
-            // Ignore single digit number 
-            let result = self.chop_while(|x| x.is_numeric());
-            if result.len() == 1 { return None; }
-            return Some(result.iter().collect());
-        }
-
-        if self.content[0].is_alphabetic() {
-            let result = self.chop_while(|x| x.is_alphanumeric());
-            let token = result.iter().collect::<String>();
-
-            let stemmed = stemmer.stem(&token).into_owned().to_uppercase();
-            if STOP_WORDS.contains(&stemmed.as_str()) {
+            if self.content.len() == 0 {
                 return None;
             }
-            return Some(stemmed);
+
+            if self.content[0].is_numeric() {
+                // Ignore single digit number 
+                let result = self.chop_while(|x| x.is_numeric());
+                if result.len() == 1 { continue; }
+                return Some(result.iter().collect());
+            }
+
+            if self.content[0].is_alphabetic() {
+                let result = self.chop_while(|x| x.is_alphanumeric());
+                let token = result.iter().collect::<String>();
+
+                let stemmed = stemmer.stem(&token).into_owned().to_uppercase();
+                if STOP_WORDS.contains(&stemmed.as_str()) {
+                    continue;
+                }
+                return Some(stemmed);
+            }
+            
+            let token = self.chop(1);
+            return Some(token.iter().collect());
         }
-        
-        let token = self.chop(1);
-        return Some(token.iter().collect());
     }
 }
 
