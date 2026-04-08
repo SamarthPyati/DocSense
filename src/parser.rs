@@ -55,5 +55,14 @@ pub enum Commands {
         address: String, 
         #[arg(short, long, default_value = "tfidf", value_enum, help = "Ranking algorithm to use")]
         rank_method: RankMethod,
+    },
+
+    #[command(
+        about = "Run comprehensive benchmarks",
+        long_about = "Benchmarks indexing and search performance on the provided directory to generate research metrics."
+    )]
+    Benchmark {
+        #[arg(help = "Path to the corpus directory to benchmark")]
+        dir_path: String,
     }
 }

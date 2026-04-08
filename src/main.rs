@@ -12,6 +12,7 @@ mod parser;
 mod lexer;
 mod server;
 mod model;
+mod benchmark;
 
 use crate::model::*;
 use poppler::{Document};
@@ -187,7 +188,7 @@ fn append_folder_to_model(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, pro
 
         visited.insert(file_path.clone());
         
-        // Main 
+        // Main logic
         let mut model = model.lock().unwrap();
         if model.requires_reindexing(&file_path, last_modified)? {
             println!("{}: Indexing {} ...", "INFO".cyan(), file_path_str.bright_cyan());
@@ -236,7 +237,7 @@ fn fetch_model(index_path: &str) -> Result<InMemoryModel, ()> {
     return Ok(model);
 }
 
-fn index_directory(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, index_path: Option<&str>) -> Result<(), ()> {
+pub(crate) fn index_directory(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, index_path: Option<&str>) -> Result<(), ()> {
     let root_dir = fs::canonicalize(dir_path).unwrap_or_else(|err| {
         eprintln!("{}: Could not canonicalize root dir {} as {}", "ERROR".bold().red(), dir_path.display().to_string().bright_blue(), err.to_string().red());
         exit(1);
@@ -274,7 +275,7 @@ fn index_directory(dir_path: &Path, model: Arc<Mutex<InMemoryModel>>, index_path
 }
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
-enum RankMethod {
+pub(crate) enum RankMethod {
     Tfidf, 
     Bm25
 }
@@ -340,6 +341,11 @@ fn entry() -> Result<(), ()> {
             // TODO: Print the information of server start at the end of logging
             return server::start(&address, Arc::clone(&model), rank_method, root_dir);
         }   
+
+        Commands::Benchmark { dir_path } => {
+            use benchmark::run_benchmark;
+            run_benchmark(Path::new(&dir_path))?;
+        }
     }
     Ok(())
 }
